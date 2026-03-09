@@ -962,14 +962,15 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.clear()
         payload = extract_start_payload(message.text or "")
 
+        promo_block = ""
         if payload:
             success, promo_message, granted = await repo.redeem_promo_code(payload, user["tg_id"])
             if success:
                 new_balance = await repo.get_user_balance(user["tg_id"])
-                await message.answer(
+                promo_block = (
                     f"{promo_message}\n"
                     f"Granted: {granted}\n"
-                    f"Your balance: {new_balance}"
+                    f"Your balance: {new_balance}\n\n"
                 )
             else:
                 await message.answer(promo_message)
@@ -977,6 +978,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if user["is_authorized"]:
             balance = await repo.get_user_balance(user["tg_id"])
             await message.answer(
+                f"{promo_block}"
                 "Welcome!\n"
                 "Choose one of the prompt buttons below.\n"
                 "For each prompt, I will ask for required values and then generate an image.\n"
@@ -986,6 +988,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
 
         await message.answer(
+            f"{promo_block}"
             "Welcome to the Image Generation Bot.\n"
             "How it works:\n"
             "- You choose a prompt from buttons\n"
