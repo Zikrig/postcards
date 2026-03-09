@@ -96,6 +96,8 @@ class AdminStates(StatesGroup):
     waiting_prompt_title = State()
     waiting_prompt_template = State()
     waiting_variable_description = State()
+    waiting_text_options = State()
+    waiting_text_allow_custom = State()
     waiting_prompt_reference = State()
 
 
@@ -358,7 +360,8 @@ def build_main_menu(prompt_titles: list[str]) -> ReplyKeyboardMarkup:
 def build_admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Create Prompt", callback_data="admin:create_prompt")]
+            [InlineKeyboardButton(text="Create Prompt", callback_data="admin:create_prompt")],
+            [InlineKeyboardButton(text="Delete Prompt", callback_data="admin:delete_prompt")],
         ]
     )
 
@@ -385,6 +388,95 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             await message.answer("No prompts yet. Please wait for admin to add them.")
             return
         await message.answer("Select a prompt:", reply_markup=build_main_menu(titles))
+
+    def get_variable_config(
+        raw_configs: dict[str, Any],
+        token: str,
+        var_type: str,
+    ) -> dict[str, Any]:
+        raw = raw_configs.get(token)
+        if isinstance(raw, str):
+            # Backward compatibility with old format: {"<var>": "description"}
+            return {
+                "description": raw,
+                "options": [],
+                "allow_custom": True,
+                "type": var_type,
+            }
+        if isinstance(raw, dict):
+            return {
+                "description": str(raw.get("description") or ""),
+                "options": [str(x) for x in (raw.get("options") or []) if str(x).strip()],
+                "allow_custom": bool(raw.get("allow_custom", True)),
+                "type": str(raw.get("type") or var_type),
+            }
+        return {
+            "description": "",
+            "options": [],
+            "allow_custom": True,
+            "type": var_type,
+        }
+
+    def build_text_options_keyboard(options: list[str], allow_custom: bool) -> ReplyKeyboardMarkup:
+        keyboard = [[KeyboardButton(text=opt)] for opt in options]
+        if allow_custom:
+            keyboard.append([KeyboardButton(text="My own")])
+        return ReplyKeyboardMarkup(
+            keyboard=keyboard,
+            resize_keyboard=True,
+            input_field_placeholder="Choose an option",
+        )
+
+    async def ask_admin_next_var_description(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+
+        var = variables[idx]
+        token = variable_token(var)
+        await message.answer(
+            f"Write a user-facing description for {token}.\n"
+            "User will see only this text.\n"
+            "Type /skip to leave description empty."
+        )
+
+    async def ask_admin_text_options(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await ask_admin_next_var_description(message, state)
+            return
+
+        var = variables[idx]
+        if var["type"] != "text":
+            await state.update_data(var_desc_idx=idx + 1)
+            await ask_admin_next_var_description(message, state)
+            return
+
+        token = variable_token(var)
+        await state.set_state(AdminStates.waiting_text_options)
+        await message.answer(
+            f"Set answer options for {token}.\n"
+            "Send options separated by ';' (example: Mars; Venus; Jupiter), or /skip for no options."
+        )
+
+    async def ask_admin_allow_custom(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        var = variables[idx]
+        token = variable_token(var)
+        await state.set_state(AdminStates.waiting_text_allow_custom)
+        await message.answer(
+            f"Allow 'My own' custom text for {token}? Reply with yes or no."
+        )
 
     async def ask_admin_next_var_description(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
@@ -418,22 +510,23 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         var_name = variable["name"]
         var_type = variable["type"]
         token = variable_token(variable)
-        variable_descriptions: dict[str, str] = data.get("variable_descriptions", {})
-        description = (variable_descriptions.get(token) or "").strip()
+        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        config = get_variable_config(variable_descriptions, token, var_type)
+        description = str(config.get("description") or "").strip()
+        options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
+        allow_custom = bool(config.get("allow_custom", True))
 
         if description:
             await message.answer(description, reply_markup=ReplyKeyboardRemove())
-            return
-
-        if var_type == "image":
-            await message.answer(
-                "Please send a photo.",
-                reply_markup=ReplyKeyboardRemove(),
-            )
+        elif var_type == "image":
+            await message.answer("Please send a photo.", reply_markup=ReplyKeyboardRemove())
         else:
+            await message.answer("Please send text.", reply_markup=ReplyKeyboardRemove())
+
+        if var_type == "text" and options:
             await message.answer(
-                "Please send text.",
-                reply_markup=ReplyKeyboardRemove(),
+                "Choose one option:",
+                reply_markup=build_text_options_keyboard(options, allow_custom),
             )
 
     async def run_generation(message: Message, state: FSMContext) -> None:
@@ -589,6 +682,56 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.set_state(AdminStates.waiting_prompt_title)
         await callback.answer()
 
+    @router.callback_query(F.data == "admin:delete_prompt")
+    async def admin_delete_prompt_start(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+
+        prompts = await repo.list_prompts()
+        if not prompts:
+            await callback.message.answer("No prompts to delete.")
+            await callback.answer()
+            return
+
+        buttons = [
+            [InlineKeyboardButton(text=f"Delete: {p['title']}", callback_data=f"admin:delete:{p['id']}")]
+            for p in prompts
+        ]
+        await callback.message.answer(
+            "Select prompt to delete:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:delete:"))
+    async def admin_delete_prompt_confirm(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+
+        try:
+            prompt_id = int(callback.data.split(":")[-1])  # type: ignore[union-attr]
+        except (TypeError, ValueError):
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+
+        async with repo.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT title FROM prompts WHERE id = $1", prompt_id)
+            if not row:
+                await callback.answer("Prompt not found", show_alert=True)
+                return
+            await conn.execute("DELETE FROM prompts WHERE id = $1", prompt_id)
+
+        await callback.message.answer(f"Prompt deleted: {row['title']}")
+        await callback.answer("Deleted")
+
     @router.message(AdminStates.waiting_prompt_title)
     async def admin_prompt_title(message: Message, state: FSMContext) -> None:
         title = (message.text or "").strip()
@@ -630,7 +773,29 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
     @router.message(AdminStates.waiting_variable_description, Command("skip"))
     async def admin_var_desc_skip(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
         idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+
+        var = variables[idx]
+        token = variable_token(var)
+        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions[token] = {
+            "description": "",
+            "options": [],
+            "allow_custom": True,
+            "type": var["type"],
+        }
+        await state.update_data(variable_descriptions=variable_descriptions)
+        if var["type"] == "text":
+            await ask_admin_text_options(message, state)
+            return
+
         await state.update_data(var_desc_idx=idx + 1)
         await ask_admin_next_var_description(message, state)
 
@@ -651,9 +816,88 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         var = variables[idx]
         token = variable_token(var)
-        descriptions: dict[str, str] = data.get("variable_descriptions", {})
-        descriptions[token] = text
+        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        existing = get_variable_config(descriptions, token, var["type"])
+        existing["description"] = text
+        existing["type"] = var["type"]
+        descriptions[token] = existing
+        await state.update_data(variable_descriptions=descriptions)
+        if var["type"] == "text":
+            await ask_admin_text_options(message, state)
+            return
+        await state.update_data(var_desc_idx=idx + 1)
+        await ask_admin_next_var_description(message, state)
+
+    @router.message(AdminStates.waiting_text_options, Command("skip"))
+    async def admin_text_options_skip(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+        var = variables[idx]
+        token = variable_token(var)
+        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        existing = get_variable_config(descriptions, token, "text")
+        existing["options"] = []
+        existing["allow_custom"] = True
+        descriptions[token] = existing
         await state.update_data(variable_descriptions=descriptions, var_desc_idx=idx + 1)
+        await state.set_state(AdminStates.waiting_variable_description)
+        await ask_admin_next_var_description(message, state)
+
+    @router.message(AdminStates.waiting_text_options)
+    async def admin_text_options_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Send options separated by ';' or /skip.")
+            return
+        options = [part.strip() for part in text.split(";") if part.strip()]
+        if not options:
+            await message.answer("No valid options found. Try again or /skip.")
+            return
+
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        var = variables[idx]
+        token = variable_token(var)
+        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        existing = get_variable_config(descriptions, token, "text")
+        existing["options"] = options
+        descriptions[token] = existing
+        await state.update_data(variable_descriptions=descriptions)
+        await ask_admin_allow_custom(message, state)
+
+    @router.message(AdminStates.waiting_text_allow_custom)
+    async def admin_text_allow_custom_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip().lower()
+        if text not in {"yes", "no", "y", "n"}:
+            await message.answer("Please reply with yes or no.")
+            return
+        allow_custom = text in {"yes", "y"}
+
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        var = variables[idx]
+        token = variable_token(var)
+        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        existing = get_variable_config(descriptions, token, "text")
+        options = [str(x) for x in (existing.get("options") or []) if str(x).strip()]
+        if not options:
+            allow_custom = True
+        existing["allow_custom"] = allow_custom
+        descriptions[token] = existing
+        await state.update_data(
+            variable_descriptions=descriptions,
+            var_desc_idx=idx + 1,
+        )
+        await state.set_state(AdminStates.waiting_variable_description)
         await ask_admin_next_var_description(message, state)
 
     @router.message(AdminStates.waiting_prompt_reference, Command("skip"))
@@ -759,6 +1003,12 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         var_type = variable["type"]
         answers: dict[str, str] = data.get("answers", {})
         image_urls: list[str] = data.get("image_urls", [])
+        token = variable_token(variable)
+        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        config = get_variable_config(variable_descriptions, token, var_type)
+        options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
+        allow_custom = bool(config.get("allow_custom", True))
+        awaiting_custom_for = data.get("awaiting_custom_for")
 
         if var_type == "image":
             if not message.photo:
@@ -769,16 +1019,42 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             image_urls.append(file_url)
             answers[var_name] = "provided reference image"
         else:
-            value = (message.text or "").strip()
-            if not value:
-                await message.answer("Please send text.")
-                return
-            answers[var_name] = value
+            if options:
+                if awaiting_custom_for == token:
+                    value = (message.text or "").strip()
+                    if not value:
+                        await message.answer("Please send text.")
+                        return
+                    answers[var_name] = value
+                    await state.update_data(awaiting_custom_for=None)
+                else:
+                    value = (message.text or "").strip()
+                    if value == "My own":
+                        if not allow_custom:
+                            await message.answer("Please choose one of the options.")
+                            return
+                        await state.update_data(awaiting_custom_for=token)
+                        await message.answer("Please type your own value.", reply_markup=ReplyKeyboardRemove())
+                        return
+                    if value not in options:
+                        await message.answer(
+                            "Please choose one of the options.",
+                            reply_markup=build_text_options_keyboard(options, allow_custom),
+                        )
+                        return
+                    answers[var_name] = value
+            else:
+                value = (message.text or "").strip()
+                if not value:
+                    await message.answer("Please send text.")
+                    return
+                answers[var_name] = value
 
         await state.update_data(
             answers=answers,
             image_urls=image_urls,
             current_idx=current_idx + 1,
+            awaiting_custom_for=None,
         )
         await ask_next_variable(message, state)
 
