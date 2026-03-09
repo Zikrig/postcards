@@ -1,0 +1,6 @@
+__pycache__/
+.env
+venv/
+generate_image.py
+text.txt
+images/
