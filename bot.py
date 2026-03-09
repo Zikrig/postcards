@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import re
@@ -94,6 +95,7 @@ class AuthStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_prompt_title = State()
     waiting_prompt_template = State()
+    waiting_variable_description = State()
     waiting_prompt_reference = State()
 
 
@@ -120,6 +122,13 @@ def extract_variables(template: str) -> list[dict[str, str]]:
             values.append({"name": var_name, "type": var_type})
             seen.add(key)
     return values
+
+
+def variable_token(variable: dict[str, str]) -> str:
+    name = variable["name"]
+    if variable["type"] == "image":
+        return f"[{name}]"
+    return f"<{name}>"
 
 
 def render_prompt(template: str, answers: dict[str, str]) -> str:
@@ -227,10 +236,17 @@ class Repo:
                     id SERIAL PRIMARY KEY,
                     title TEXT UNIQUE NOT NULL,
                     template TEXT NOT NULL,
+                    variable_descriptions JSONB NOT NULL DEFAULT '{}'::jsonb,
                     reference_photo_file_id TEXT,
                     created_by BIGINT NOT NULL,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS variable_descriptions JSONB NOT NULL DEFAULT '{}'::jsonb;
                 """
             )
 
@@ -285,17 +301,19 @@ class Repo:
         self,
         title: str,
         template: str,
+        variable_descriptions: dict[str, str],
         reference_photo_file_id: Optional[str],
         created_by: int,
     ) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO prompts (title, template, reference_photo_file_id, created_by)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by)
+                VALUES ($1, $2, $3::jsonb, $4, $5)
                 """,
                 title,
                 template,
+                json.dumps(variable_descriptions),
                 reference_photo_file_id,
                 created_by,
             )
@@ -340,6 +358,25 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         await message.answer("Select a prompt:", reply_markup=build_main_menu(titles))
 
+    async def ask_admin_next_var_description(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+
+        var = variables[idx]
+        token = variable_token(var)
+        await message.answer(
+            f"Write a user-facing description for {token}.\n"
+            "User will see only this text.\n"
+            "Type /skip to leave description empty."
+        )
+
     async def ask_next_variable(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         variables: list[dict[str, str]] = data.get("variables", [])
@@ -352,14 +389,22 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         variable = variables[current_idx]
         var_name = variable["name"]
         var_type = variable["type"]
+        token = variable_token(variable)
+        variable_descriptions: dict[str, str] = data.get("variable_descriptions", {})
+        description = (variable_descriptions.get(token) or "").strip()
+
+        if description:
+            await message.answer(description, reply_markup=ReplyKeyboardRemove())
+            return
+
         if var_type == "image":
             await message.answer(
-                f"Please send an image for variable: {var_name}",
+                "Please send a photo.",
                 reply_markup=ReplyKeyboardRemove(),
             )
         else:
             await message.answer(
-                f"Please enter value for variable: {var_name}",
+                "Please send text.",
                 reply_markup=ReplyKeyboardRemove(),
             )
 
@@ -495,11 +540,51 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not template:
             await message.answer("Template cannot be empty. Send prompt template:")
             return
+        variables = extract_variables(template)
         await state.update_data(prompt_template=template)
-        await state.set_state(AdminStates.waiting_prompt_reference)
-        await message.answer(
-            "Send optional reference image now, or type /skip to continue without it."
+        await state.update_data(
+            prompt_variables=variables,
+            var_desc_idx=0,
+            variable_descriptions={},
         )
+        if not variables:
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "No variables detected.\n"
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+        await state.set_state(AdminStates.waiting_variable_description)
+        await ask_admin_next_var_description(message, state)
+
+    @router.message(AdminStates.waiting_variable_description, Command("skip"))
+    async def admin_var_desc_skip(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        idx: int = data.get("var_desc_idx", 0)
+        await state.update_data(var_desc_idx=idx + 1)
+        await ask_admin_next_var_description(message, state)
+
+    @router.message(AdminStates.waiting_variable_description)
+    async def admin_var_desc_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Description cannot be empty. Send description or /skip.")
+            return
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await state.set_state(AdminStates.waiting_prompt_reference)
+            await message.answer(
+                "Send optional reference image now, or type /skip to continue without it."
+            )
+            return
+        var = variables[idx]
+        token = variable_token(var)
+        descriptions: dict[str, str] = data.get("variable_descriptions", {})
+        descriptions[token] = text
+        await state.update_data(variable_descriptions=descriptions, var_desc_idx=idx + 1)
+        await ask_admin_next_var_description(message, state)
 
     @router.message(AdminStates.waiting_prompt_reference, Command("skip"))
     async def admin_prompt_skip_reference(message: Message, state: FSMContext) -> None:
@@ -509,6 +594,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             await repo.insert_prompt(
                 title=data["prompt_title"],
                 template=data["prompt_template"],
+                variable_descriptions=data.get("variable_descriptions", {}),
                 reference_photo_file_id=None,
                 created_by=user["tg_id"] if user else message.from_user.id,
             )
@@ -527,6 +613,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             await repo.insert_prompt(
                 title=data["prompt_title"],
                 template=data["prompt_template"],
+                variable_descriptions=data.get("variable_descriptions", {}),
                 reference_photo_file_id=file_id,
                 created_by=user["tg_id"] if user else message.from_user.id,
             )
@@ -567,6 +654,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             current_idx=0,
             answers={},
             image_urls=[],
+            variable_descriptions=prompt.get("variable_descriptions") or {},
             reference_photo_file_id=prompt["reference_photo_file_id"],
         )
 
@@ -604,7 +692,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
         if var_type == "image":
             if not message.photo:
-                await message.answer(f"Variable '{var_name}' expects an image. Please send a photo.")
+                await message.answer("Please send a photo.")
                 return
             file_id = message.photo[-1].file_id
             file_url = await telegram_file_url(file_id)
@@ -613,7 +701,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         else:
             value = (message.text or "").strip()
             if not value:
-                await message.answer(f"Variable '{var_name}' expects text. Please try again.")
+                await message.answer("Please send text.")
                 return
             answers[var_name] = value
 
