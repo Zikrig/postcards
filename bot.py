@@ -1160,10 +1160,6 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await message.answer(
             f"{promo_block}"
             "Please enter password to continue.\n\n"
-            "After that you will see a list of prompts as buttons.\n"
-            "For reference:\n"
-            "- Variables in [ ] mean image input\n"
-            "- Variables in < > mean text input"
         )
         await state.set_state(AuthStates.waiting_password)
 
