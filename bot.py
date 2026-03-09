@@ -875,9 +875,28 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
             details = await evo.wait_for_completion(task_id, on_progress=update_progress)
 
-            if details.get("status") != "completed":
+            status = details.get("status")
+            if status != "completed":
                 await progress_message.delete()
-                await message.answer(f"Generation failed: {details}")
+
+                error = (details.get("error") or {}) if isinstance(details, dict) else {}
+                error_code = error.get("code")
+                error_message = (error.get("message") or "").strip()
+
+                user_friendly = "Image generation failed."
+                if error_message:
+                    user_friendly = f"{user_friendly}\nReason: {error_message}"
+
+                # Special handling for content policy violations to give clearer guidance.
+                if error_code == "content_policy_violation":
+                    user_friendly += (
+                        "\n\nIt looks like the request may include brand logos, "
+                        "trademarks, or copyrighted characters. "
+                        "Please remove logos, brand names, and protected characters, "
+                        "then try again."
+                    )
+
+                await message.answer(user_friendly)
                 return
 
             results = details.get("results") or []
