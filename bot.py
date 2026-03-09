@@ -1102,7 +1102,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
         # Notify only when remaining balance crossed to a lower 20-step bucket.
         if current_bucket < prev_bucket:
-            crossed_value = current_bucket * 20
+            crossed_value = (current_bucket + 1) * 20
             user_id = state_data.get("request_user_id")
             username = state_data.get("request_username") or "no_username"
             full_name = state_data.get("request_full_name") or "Unknown user"
@@ -1110,9 +1110,9 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
             admin_text = (
                 "Balance checkpoint reached.\n"
-                f"Triggered by: {user_label}\n"
+                # f"Triggered by: {user_label}\n"
                 f"User remaining credits: {remaining}\n"
-                f"Crossed threshold: <= {crossed_value}"
+                # f"Crossed threshold: <= {crossed_value}"
             )
             for admin_id in settings.admin_ids:
                 try:
