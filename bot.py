@@ -102,21 +102,24 @@ class GenerateStates(StatesGroup):
 
 
 VARIABLE_RE = re.compile(r"\[([^\[\]<>]+)\]|<([^<>]+)>")
-IMAGE_VAR_HINTS = ("image", "photo", "img", "picture", "avatar", "face", "selfie")
 
 
-def extract_variables(template: str) -> list[str]:
-    values: list[str] = []
+def extract_variables(template: str) -> list[dict[str, str]]:
+    values: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
     for m in VARIABLE_RE.finditer(template):
-        var_name = (m.group(1) or m.group(2) or "").strip()
-        if var_name and var_name not in values:
-            values.append(var_name)
+        if m.group(1):
+            var_name = m.group(1).strip()
+            var_type = "image"
+        else:
+            var_name = (m.group(2) or "").strip()
+            var_type = "text"
+
+        key = (var_name, var_type)
+        if var_name and key not in seen:
+            values.append({"name": var_name, "type": var_type})
+            seen.add(key)
     return values
-
-
-def is_image_variable(var_name: str) -> bool:
-    lowered = var_name.lower()
-    return any(hint in lowered for hint in IMAGE_VAR_HINTS)
 
 
 def render_prompt(template: str, answers: dict[str, str]) -> str:
@@ -339,16 +342,17 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
     async def ask_next_variable(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
-        variables: list[str] = data.get("variables", [])
+        variables: list[dict[str, str]] = data.get("variables", [])
         current_idx: int = data.get("current_idx", 0)
 
         if current_idx >= len(variables):
             await run_generation(message, state)
             return
 
-        var_name = variables[current_idx]
-        await state.update_data(current_var=var_name)
-        if is_image_variable(var_name):
+        variable = variables[current_idx]
+        var_name = variable["name"]
+        var_type = variable["type"]
+        if var_type == "image":
             await message.answer(
                 f"Please send an image for variable: {var_name}",
                 reply_markup=ReplyKeyboardRemove(),
@@ -571,18 +575,20 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
     @router.message(GenerateStates.waiting_variable)
     async def collect_variable_value(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
-        variables: list[str] = data.get("variables", [])
+        variables: list[dict[str, str]] = data.get("variables", [])
         current_idx: int = data.get("current_idx", 0)
 
         if current_idx >= len(variables):
             await run_generation(message, state)
             return
 
-        var_name = variables[current_idx]
+        variable = variables[current_idx]
+        var_name = variable["name"]
+        var_type = variable["type"]
         answers: dict[str, str] = data.get("answers", {})
         image_urls: list[str] = data.get("image_urls", [])
 
-        if is_image_variable(var_name):
+        if var_type == "image":
             if not message.photo:
                 await message.answer(f"Variable '{var_name}' expects an image. Please send a photo.")
                 return
