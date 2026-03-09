@@ -415,11 +415,23 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.clear()
 
         if user["is_authorized"]:
-            await message.answer("Welcome! You are authorized.")
+            await message.answer(
+                "Welcome!\n"
+                "Choose one of the prompt buttons below.\n"
+                "For each prompt, I will ask for required values and then generate an image."
+            )
             await show_prompt_buttons(message)
             return
 
-        await message.answer("Welcome! Please enter password to continue:")
+        await message.answer(
+            "Welcome to the Image Generation Bot.\n"
+            "How it works:\n"
+            "- You choose a prompt from buttons\n"
+            "- Variables in [ ] mean image input\n"
+            "- Variables in < > mean text input\n"
+            "- I generate an image and show your current balance\n\n"
+            "Please enter password to continue:"
+        )
         await state.set_state(AuthStates.waiting_password)
 
     @router.message(AuthStates.waiting_password)
@@ -471,7 +483,9 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.update_data(prompt_title=title)
         await state.set_state(AdminStates.waiting_prompt_template)
         await message.answer(
-            "Send prompt template. Use [var] or <var> for variables.\n"
+            "Send prompt template.\n"
+            "- Use [var] for image variables\n"
+            "- Use <var> for text variables\n"
             "Example: Photorealistic astronauts on <planet_name> with [user_photo]."
         )
 
