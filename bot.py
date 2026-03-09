@@ -95,6 +95,9 @@ class AdminStates(StatesGroup):
     waiting_prompt_template = State()
     waiting_prompt_edit_title = State()
     waiting_prompt_edit_template = State()
+    waiting_prompt_edit_variable_name = State()
+    waiting_prompt_edit_variable_description = State()
+    waiting_prompt_edit_variable_options = State()
     waiting_variable_description = State()
     waiting_text_options = State()
     waiting_text_allow_custom = State()
@@ -644,6 +647,40 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, str]]) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = []
+    for idx, var in enumerate(variables):
+        token = variable_token(var)
+        rows.append(
+            [InlineKeyboardButton(text=token, callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
+        )
+    rows.append([InlineKeyboardButton(text="Back to prompt edit", callback_data=f"admin:edit:{prompt_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_prompt_edit_variable_actions_menu(
+    prompt_id: int,
+    var_idx: int,
+    variable: dict[str, str],
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="Rename variable", callback_data=f"admin:editvar:field:name:{prompt_id}:{var_idx}")],
+        [InlineKeyboardButton(text="Change description", callback_data=f"admin:editvar:field:desc:{prompt_id}:{var_idx}")],
+    ]
+    if variable.get("type") == "text":
+        rows.append(
+            [InlineKeyboardButton(text="Change options", callback_data=f"admin:editvar:field:opts:{prompt_id}:{var_idx}")]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(text="My own: ON", callback_data=f"admin:editvar:allow:{prompt_id}:{var_idx}:yes"),
+                InlineKeyboardButton(text="My own: OFF", callback_data=f"admin:editvar:allow:{prompt_id}:{var_idx}:no"),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="Back to variables", callback_data=f"admin:editpart:variables:{prompt_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def build_promo_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -756,6 +793,64 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             f"Reference image: {reference_text}\n"
             "Choose what to change:",
             reply_markup=build_prompt_edit_menu(int(prompt["id"])),
+        )
+
+    async def persist_prompt_edit_state(state: FSMContext) -> Optional[asyncpg.Record]:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            return None
+        await repo.update_prompt(
+            prompt_id=int(prompt_id),
+            title=data["prompt_title"],
+            template=data["prompt_template"],
+            variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
+            reference_photo_file_id=data.get("reference_photo_file_id"),
+        )
+        return await repo.get_prompt_by_id(int(prompt_id))
+
+    async def show_variable_pick_menu(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if prompt_id is None:
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            return
+        if not variables:
+            await message.answer("Template has no variables to edit.")
+            prompt = await repo.get_prompt_by_id(int(prompt_id))
+            if prompt:
+                await show_prompt_edit_actions(message, prompt)
+            return
+        await message.answer(
+            "Choose variable to edit:",
+            reply_markup=build_prompt_edit_variables_menu(int(prompt_id), variables),
+        )
+
+    async def show_variable_actions_menu(message: Message, state: FSMContext, var_idx: int) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if prompt_id is None or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable not found. Open variable list again.")
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, var["type"])
+        options = [str(x) for x in (cfg.get("options") or []) if str(x).strip()]
+        allow_custom = bool(cfg.get("allow_custom", True))
+        await state.update_data(edit_var_idx=var_idx)
+        details = (
+            f"Variable: {token}\n"
+            f"Type: {var['type']}\n"
+            f"Description: {str(cfg.get('description') or '') or '(empty)'}\n"
+        )
+        if var["type"] == "text":
+            details += f"Options: {', '.join(options) if options else '(none)'}\nMy own: {'ON' if allow_custom else 'OFF'}"
+        await message.answer(
+            details,
+            reply_markup=build_prompt_edit_variable_actions_menu(int(prompt_id), var_idx, var),
         )
 
     def build_text_options_keyboard(options: list[str], allow_custom: bool) -> InlineKeyboardMarkup:
@@ -1548,23 +1643,327 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         )
         await state.clear()
         await state.update_data(
-            admin_mode="edit_variables",
             editing_prompt_id=prompt_id,
             prompt_title=prompt["title"],
             prompt_template=template,
             prompt_variables=variables,
             variable_descriptions=descriptions,
             reference_photo_file_id=prompt["reference_photo_file_id"],
-            var_desc_idx=0,
         )
-        if not variables:
-            await callback.message.answer("Template has no variables to edit.")
-            await show_prompt_edit_actions(callback.message, prompt)
-            await callback.answer()
-            return
-        await state.set_state(AdminStates.waiting_variable_description)
-        await ask_admin_next_var_description(callback.message, state)
+        await state.set_state(None)
+        await show_variable_pick_menu(callback.message, state)
         await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editvar:pick:"))
+    async def admin_edit_variable_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 6:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[4])
+            var_idx = int(parts[5])
+        except ValueError:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+
+        data = await state.get_data()
+        if data.get("editing_prompt_id") != prompt_id:
+            prompt = await repo.get_prompt_by_id(prompt_id)
+            if not prompt:
+                await callback.answer("Prompt not found", show_alert=True)
+                return
+            template = prompt["template"]
+            variables = extract_variables(template)
+            descriptions = normalize_variable_descriptions_for_template(
+                prompt.get("variable_descriptions") or {},
+                variables,
+            )
+            await state.clear()
+            await state.update_data(
+                editing_prompt_id=prompt_id,
+                prompt_title=prompt["title"],
+                prompt_template=template,
+                prompt_variables=variables,
+                variable_descriptions=descriptions,
+                reference_photo_file_id=prompt["reference_photo_file_id"],
+            )
+            await state.set_state(None)
+
+        await show_variable_actions_menu(callback.message, state, var_idx)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editvar:field:name:"))
+    async def admin_edit_variable_name_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 7:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        try:
+            var_idx = int(parts[6])
+        except ValueError:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        await state.update_data(edit_var_idx=var_idx)
+        await state.set_state(AdminStates.waiting_prompt_edit_variable_name)
+        await callback.message.answer(
+            "Send new variable name only (without [] or <>).\n"
+            "Example: USER_PHOTO"
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editvar:field:desc:"))
+    async def admin_edit_variable_description_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 7:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        try:
+            var_idx = int(parts[6])
+        except ValueError:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        await state.update_data(edit_var_idx=var_idx)
+        await state.set_state(AdminStates.waiting_prompt_edit_variable_description)
+        await callback.message.answer(
+            "Send new user-facing description.\n"
+            "Use /skip to clear description."
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editvar:field:opts:"))
+    async def admin_edit_variable_options_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 7:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        try:
+            var_idx = int(parts[6])
+        except ValueError:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if var_idx < 0 or var_idx >= len(variables):
+            await callback.answer("Variable not found", show_alert=True)
+            return
+        if variables[var_idx]["type"] != "text":
+            await callback.answer("Options are available only for text variables.", show_alert=True)
+            return
+        await state.update_data(edit_var_idx=var_idx)
+        await state.set_state(AdminStates.waiting_prompt_edit_variable_options)
+        await callback.message.answer(
+            "Send options separated by ';'.\n"
+            "Use /skip to clear options."
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editvar:allow:"))
+    async def admin_edit_variable_allow_custom(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 7:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        try:
+            var_idx = int(parts[5])
+        except ValueError:
+            await callback.answer("Invalid variable action", show_alert=True)
+            return
+        allow_custom = parts[6] == "yes"
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if var_idx < 0 or var_idx >= len(variables):
+            await callback.answer("Variable not found", show_alert=True)
+            return
+        var = variables[var_idx]
+        if var["type"] != "text":
+            await callback.answer("My own is available only for text variables.", show_alert=True)
+            return
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, "text")
+        cfg["allow_custom"] = allow_custom
+        descriptions[token] = cfg
+        await state.update_data(variable_descriptions=descriptions)
+        await persist_prompt_edit_state(state)
+        await show_variable_actions_menu(callback.message, state, var_idx)
+        await callback.answer("Saved")
+
+    @router.message(AdminStates.waiting_prompt_edit_variable_name)
+    async def admin_edit_variable_name_value(message: Message, state: FSMContext) -> None:
+        new_name = (message.text or "").strip()
+        if not new_name:
+            await message.answer("Variable name cannot be empty. Send new name:")
+            return
+        if any(ch in new_name for ch in "[]<>"):
+            await message.answer("Send name without brackets [] or <>.")
+            return
+
+        data = await state.get_data()
+        var_idx = data.get("edit_var_idx")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if not isinstance(var_idx, int) or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable edit session expired. Open variable list again.")
+            await state.set_state(None)
+            return
+
+        old_var = variables[var_idx]
+        if any(
+            i != var_idx and v["type"] == old_var["type"] and v["name"] == new_name
+            for i, v in enumerate(variables)
+        ):
+            await message.answer("Variable with this name already exists for this type.")
+            return
+
+        old_token = variable_token(old_var)
+        new_var = {"name": new_name, "type": old_var["type"]}
+        new_token = variable_token(new_var)
+        template = str(data.get("prompt_template") or "").replace(old_token, new_token)
+        variables_updated = extract_variables(template)
+
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        old_cfg = get_variable_config(descriptions, old_token, old_var["type"])
+        descriptions.pop(old_token, None)
+        descriptions[new_token] = old_cfg
+        descriptions = normalize_variable_descriptions_for_template(descriptions, variables_updated)
+
+        await state.update_data(
+            prompt_template=template,
+            prompt_variables=variables_updated,
+            variable_descriptions=descriptions,
+        )
+        await persist_prompt_edit_state(state)
+        await state.set_state(None)
+        await message.answer("Variable renamed.")
+        new_idx = next(
+            (i for i, v in enumerate(variables_updated) if variable_token(v) == new_token),
+            0,
+        )
+        await show_variable_actions_menu(message, state, new_idx)
+
+    @router.message(AdminStates.waiting_prompt_edit_variable_description, Command("skip"))
+    async def admin_edit_variable_description_skip(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        var_idx = data.get("edit_var_idx")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if not isinstance(var_idx, int) or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable edit session expired. Open variable list again.")
+            await state.set_state(None)
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, var["type"])
+        cfg["description"] = ""
+        descriptions[token] = cfg
+        await state.update_data(variable_descriptions=descriptions)
+        await persist_prompt_edit_state(state)
+        await state.set_state(None)
+        await message.answer("Description cleared.")
+        await show_variable_actions_menu(message, state, var_idx)
+
+    @router.message(AdminStates.waiting_prompt_edit_variable_description)
+    async def admin_edit_variable_description_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Description cannot be empty. Send text or /skip.")
+            return
+        data = await state.get_data()
+        var_idx = data.get("edit_var_idx")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if not isinstance(var_idx, int) or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable edit session expired. Open variable list again.")
+            await state.set_state(None)
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, var["type"])
+        cfg["description"] = text
+        descriptions[token] = cfg
+        await state.update_data(variable_descriptions=descriptions)
+        await persist_prompt_edit_state(state)
+        await state.set_state(None)
+        await message.answer("Description updated.")
+        await show_variable_actions_menu(message, state, var_idx)
+
+    @router.message(AdminStates.waiting_prompt_edit_variable_options, Command("skip"))
+    async def admin_edit_variable_options_skip(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        var_idx = data.get("edit_var_idx")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if not isinstance(var_idx, int) or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable edit session expired. Open variable list again.")
+            await state.set_state(None)
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, "text")
+        cfg["options"] = []
+        cfg["allow_custom"] = True
+        descriptions[token] = cfg
+        await state.update_data(variable_descriptions=descriptions)
+        await persist_prompt_edit_state(state)
+        await state.set_state(None)
+        await message.answer("Options cleared. My own enabled.")
+        await show_variable_actions_menu(message, state, var_idx)
+
+    @router.message(AdminStates.waiting_prompt_edit_variable_options)
+    async def admin_edit_variable_options_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        options = [part.strip() for part in text.split(";") if part.strip()]
+        if not options:
+            await message.answer("No valid options found. Send options or /skip to clear.")
+            return
+        data = await state.get_data()
+        var_idx = data.get("edit_var_idx")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if not isinstance(var_idx, int) or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable edit session expired. Open variable list again.")
+            await state.set_state(None)
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = get_variable_config(descriptions, token, "text")
+        cfg["options"] = options
+        descriptions[token] = cfg
+        await state.update_data(variable_descriptions=descriptions)
+        await persist_prompt_edit_state(state)
+        await state.set_state(None)
+        await message.answer("Options updated.")
+        await show_variable_actions_menu(message, state, var_idx)
 
     @router.callback_query(F.data.startswith("admin:editpart:ref:set:"))
     async def admin_edit_prompt_reference_set_start(callback: CallbackQuery, state: FSMContext) -> None:
