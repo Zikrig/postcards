@@ -97,6 +97,9 @@ class AdminStates(StatesGroup):
     waiting_text_options = State()
     waiting_text_allow_custom = State()
     waiting_prompt_reference = State()
+    waiting_promo_code = State()
+    waiting_promo_credits = State()
+    waiting_promo_max_uses = State()
 
 
 class GenerateStates(StatesGroup):
@@ -233,8 +236,15 @@ class Repo:
                     full_name TEXT,
                     is_authorized BOOLEAN NOT NULL DEFAULT FALSE,
                     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
+                    balance_tokens INTEGER NOT NULL DEFAULT 0,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE users
+                ADD COLUMN IF NOT EXISTS balance_tokens INTEGER NOT NULL DEFAULT 0;
                 """
             )
             await conn.execute(
@@ -261,6 +271,31 @@ class Repo:
                 CREATE TABLE IF NOT EXISTS bot_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
+                );
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS promo_codes (
+                    id SERIAL PRIMARY KEY,
+                    code TEXT UNIQUE NOT NULL,
+                    credits_amount INTEGER NOT NULL,
+                    max_uses INTEGER,
+                    uses_count INTEGER NOT NULL DEFAULT 0,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by BIGINT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS promo_redemptions (
+                    id SERIAL PRIMARY KEY,
+                    promo_id INTEGER NOT NULL REFERENCES promo_codes(id) ON DELETE CASCADE,
+                    user_tg_id BIGINT NOT NULL,
+                    redeemed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (promo_id, user_tg_id)
                 );
                 """
             )
@@ -304,6 +339,44 @@ class Repo:
                 tg_id,
             )
 
+    async def get_user_balance(self, tg_id: int) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT balance_tokens FROM users WHERE tg_id = $1", tg_id)
+            if not row:
+                return 0
+            return int(row["balance_tokens"] or 0)
+
+    async def add_user_balance(self, tg_id: int, amount: int) -> int:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE users
+                SET balance_tokens = balance_tokens + $1
+                WHERE tg_id = $2
+                RETURNING balance_tokens
+                """,
+                amount,
+                tg_id,
+            )
+            if not row:
+                return 0
+            return int(row["balance_tokens"] or 0)
+
+    async def consume_generation_token(self, tg_id: int) -> Optional[int]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE users
+                SET balance_tokens = balance_tokens - 1
+                WHERE tg_id = $1 AND balance_tokens > 0
+                RETURNING balance_tokens
+                """,
+                tg_id,
+            )
+            if not row:
+                return None
+            return int(row["balance_tokens"] or 0)
+
     async def list_prompts(self) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             return await conn.fetch("SELECT * FROM prompts ORDER BY id DESC")
@@ -337,6 +410,31 @@ class Repo:
                 created_by,
             )
 
+    async def update_prompt(
+        self,
+        prompt_id: int,
+        title: str,
+        template: str,
+        variable_descriptions: dict[str, str],
+        reference_photo_file_id: Optional[str],
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE prompts
+                SET title = $1,
+                    template = $2,
+                    variable_descriptions = $3::jsonb,
+                    reference_photo_file_id = $4
+                WHERE id = $5
+                """,
+                title,
+                template,
+                json.dumps(variable_descriptions),
+                reference_photo_file_id,
+                prompt_id,
+            )
+
     async def get_state_value(self, key: str) -> Optional[str]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT value FROM bot_state WHERE key = $1", key)
@@ -356,6 +454,87 @@ class Repo:
                 value,
             )
 
+    async def create_promo_code(
+        self,
+        code: str,
+        credits_amount: int,
+        max_uses: Optional[int],
+        created_by: int,
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO promo_codes (code, credits_amount, max_uses, created_by)
+                VALUES ($1, $2, $3, $4)
+                """,
+                code,
+                credits_amount,
+                max_uses,
+                created_by,
+            )
+
+    async def redeem_promo_code(self, code: str, user_tg_id: int) -> tuple[bool, str, int]:
+        """
+        Returns: (success, message, granted_credits)
+        """
+        async with self.pool.acquire() as conn:
+            async with conn.transaction():
+                promo = await conn.fetchrow(
+                    """
+                    SELECT *
+                    FROM promo_codes
+                    WHERE code = $1 AND is_active = TRUE
+                    FOR UPDATE
+                    """,
+                    code,
+                )
+                if not promo:
+                    return False, "Promo code is invalid or inactive.", 0
+
+                if promo["max_uses"] is not None and promo["uses_count"] >= promo["max_uses"]:
+                    return False, "Promo code usage limit reached.", 0
+
+                already_used = await conn.fetchrow(
+                    """
+                    SELECT 1
+                    FROM promo_redemptions
+                    WHERE promo_id = $1 AND user_tg_id = $2
+                    """,
+                    promo["id"],
+                    user_tg_id,
+                )
+                if already_used:
+                    return False, "You have already used this promo code.", 0
+
+                await conn.execute(
+                    """
+                    INSERT INTO promo_redemptions (promo_id, user_tg_id)
+                    VALUES ($1, $2)
+                    """,
+                    promo["id"],
+                    user_tg_id,
+                )
+                await conn.execute(
+                    """
+                    UPDATE promo_codes
+                    SET uses_count = uses_count + 1
+                    WHERE id = $1
+                    """,
+                    promo["id"],
+                )
+                row = await conn.fetchrow(
+                    """
+                    UPDATE users
+                    SET balance_tokens = balance_tokens + $1
+                    WHERE tg_id = $2
+                    RETURNING balance_tokens
+                    """,
+                    int(promo["credits_amount"]),
+                    user_tg_id,
+                )
+                new_balance = int(row["balance_tokens"] or 0) if row else 0
+                return True, "Promo code applied.", int(promo["credits_amount"])
+
 
 def build_main_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
     buttons = [
@@ -368,8 +547,29 @@ def build_main_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
 def build_admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Create Prompt", callback_data="admin:create_prompt")],
-            [InlineKeyboardButton(text="Delete Prompt", callback_data="admin:delete_prompt")],
+            [InlineKeyboardButton(text="Prompt work", callback_data="admin:prompt_work")],
+            [InlineKeyboardButton(text="Promo codes", callback_data="admin:promo_menu")],
+        ]
+    )
+
+
+def build_prompt_work_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Add prompt", callback_data="admin:pw:add")],
+            [InlineKeyboardButton(text="Edit prompt", callback_data="admin:pw:edit")],
+            [InlineKeyboardButton(text="Delete prompt", callback_data="admin:pw:delete")],
+            [InlineKeyboardButton(text="Back", callback_data="admin:pw:back")],
+        ]
+    )
+
+
+def build_promo_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Create single-user promo", callback_data="admin:promo:create:single")],
+            [InlineKeyboardButton(text="Create multi-user promo", callback_data="admin:promo:create:multi")],
+            [InlineKeyboardButton(text="Back", callback_data="admin:promo:back")],
         ]
     )
 
@@ -390,6 +590,12 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
     async def ensure_user(message: Message) -> asyncpg.Record:
         return await ensure_user_from_tg(message.from_user)
+
+    def extract_start_payload(message_text: str) -> str:
+        parts = (message_text or "").split(maxsplit=1)
+        if len(parts) < 2:
+            return ""
+        return parts[1].strip()
 
     async def show_prompt_buttons(message: Message) -> None:
         prompts = await repo.list_prompts()
@@ -528,6 +734,26 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
     async def run_generation(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
+        user_tg_id = int(
+            data.get("request_user_id")
+            or ((message.from_user.id if message.from_user else 0))
+        )
+        if not user_tg_id:
+            await message.answer("Cannot detect user account for billing.")
+            return
+
+        new_balance = await repo.consume_generation_token(user_tg_id)
+        if new_balance is None:
+            balance = await repo.get_user_balance(user_tg_id)
+            await message.answer(
+                "Not enough balance for generation.\n"
+                f"Your balance: {balance}\n"
+                "Apply a promo code via your start link."
+            )
+            await state.clear()
+            await show_prompt_buttons(message)
+            return
+
         template = data["template"]
         answers: dict[str, str] = data.get("answers", {})
         image_urls: list[str] = data.get("image_urls", [])
@@ -579,7 +805,8 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             for url in results:
                 await message.answer_photo(photo=url)
 
-            await maybe_notify_admins_balance_checkpoint(message)
+            await message.answer(f"Your balance: {new_balance}")
+            await maybe_notify_admins_balance_checkpoint(data)
         except Exception as e:
             try:
                 await progress_message.delete()
@@ -590,7 +817,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             await state.clear()
             await show_prompt_buttons(message)
 
-    async def maybe_notify_admins_balance_checkpoint(message: Message) -> None:
+    async def maybe_notify_admins_balance_checkpoint(state_data: dict[str, Any]) -> None:
         """
         Notify admins only when user remaining credits cross the next multiple of 20.
         """
@@ -621,11 +848,10 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         # Notify only when remaining balance crossed to a lower 20-step bucket.
         if current_bucket < prev_bucket:
             crossed_value = current_bucket * 20
-            tg_user = message.from_user
-            user_label = "unknown user"
-            if tg_user:
-                username = f"@{tg_user.username}" if tg_user.username else "no_username"
-                user_label = f"{tg_user.full_name} ({username}, id={tg_user.id})"
+            user_id = state_data.get("request_user_id")
+            username = state_data.get("request_username") or "no_username"
+            full_name = state_data.get("request_full_name") or "Unknown user"
+            user_label = f"{full_name} (@{username}, id={user_id})"
 
             admin_text = (
                 "Balance checkpoint reached.\n"
@@ -649,12 +875,27 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
     async def start_handler(message: Message, state: FSMContext) -> None:
         user = await ensure_user(message)
         await state.clear()
+        payload = extract_start_payload(message.text or "")
+
+        if payload:
+            success, promo_message, granted = await repo.redeem_promo_code(payload, user["tg_id"])
+            if success:
+                new_balance = await repo.get_user_balance(user["tg_id"])
+                await message.answer(
+                    f"{promo_message}\n"
+                    f"Granted: {granted}\n"
+                    f"Your balance: {new_balance}"
+                )
+            else:
+                await message.answer(promo_message)
 
         if user["is_authorized"]:
+            balance = await repo.get_user_balance(user["tg_id"])
             await message.answer(
                 "Welcome!\n"
                 "Choose one of the prompt buttons below.\n"
-                "For each prompt, I will ask for required values and then generate an image."
+                "For each prompt, I will ask for required values and then generate an image.\n"
+                f"Your balance: {balance}"
             )
             await show_prompt_buttons(message)
             return
@@ -676,7 +917,8 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         text = (message.text or "").strip()
         if text == settings.user_password:
             await repo.set_user_authorized(user["tg_id"], True)
-            await message.answer("Access granted.")
+            balance = await repo.get_user_balance(user["tg_id"])
+            await message.answer(f"Access granted.\nYour balance: {balance}")
             await state.clear()
             await show_prompt_buttons(message)
             return
@@ -698,7 +940,137 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         await message.answer("Admin panel:", reply_markup=build_admin_menu())
 
-    @router.callback_query(F.data == "admin:create_prompt")
+    @router.callback_query(F.data == "admin:prompt_work")
+    async def admin_prompt_work_menu(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await callback.message.answer("Prompt work:", reply_markup=build_prompt_work_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:pw:back")
+    async def admin_prompt_work_back(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        await callback.message.answer("Admin panel:", reply_markup=build_admin_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:promo_menu")
+    async def admin_promo_menu(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await callback.message.answer("Promo codes:", reply_markup=build_promo_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:promo:back")
+    async def admin_promo_back(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        await callback.message.answer("Admin panel:", reply_markup=build_admin_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:promo:create:single")
+    async def admin_promo_create_single(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(promo_mode="single")
+        await state.set_state(AdminStates.waiting_promo_code)
+        await callback.message.answer("Send promo code text (for start link payload).")
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:promo:create:multi")
+    async def admin_promo_create_multi(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(promo_mode="multi")
+        await state.set_state(AdminStates.waiting_promo_code)
+        await callback.message.answer("Send promo code text (for start link payload).")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_promo_code)
+    async def admin_promo_code_value(message: Message, state: FSMContext) -> None:
+        code = (message.text or "").strip()
+        if not code or len(code) < 3:
+            await message.answer("Promo code is too short. Send at least 3 characters.")
+            return
+        await state.update_data(promo_code=code)
+        await state.set_state(AdminStates.waiting_promo_credits)
+        await message.answer("How many generation tokens should this promo grant?")
+
+    @router.message(AdminStates.waiting_promo_credits)
+    async def admin_promo_credits_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) <= 0:
+            await message.answer("Send a positive integer.")
+            return
+        credits = int(text)
+        data = await state.get_data()
+        mode = data.get("promo_mode")
+        await state.update_data(promo_credits=credits)
+
+        if mode == "single":
+            await state.update_data(promo_max_uses=1)
+            await finalize_promo_creation(message, state)
+            return
+
+        await state.set_state(AdminStates.waiting_promo_max_uses)
+        await message.answer("How many users can redeem it? Send positive integer, or 0 for unlimited.")
+
+    @router.message(AdminStates.waiting_promo_max_uses)
+    async def admin_promo_max_uses_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text.isdigit() or int(text) < 0:
+            await message.answer("Send 0 or a positive integer.")
+            return
+        max_uses = int(text)
+        await state.update_data(promo_max_uses=(None if max_uses == 0 else max_uses))
+        await finalize_promo_creation(message, state)
+
+    async def finalize_promo_creation(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user = await repo.get_user(message.from_user.id)
+        try:
+            await repo.create_promo_code(
+                code=str(data["promo_code"]),
+                credits_amount=int(data["promo_credits"]),
+                max_uses=data.get("promo_max_uses"),
+                created_by=user["tg_id"] if user else message.from_user.id,
+            )
+            me = await bot.get_me()
+            if me.username:
+                link = f"https://t.me/{me.username}?start={data['promo_code']}"
+                await message.answer(
+                    "Promo code created.\n"
+                    f"Start link: {link}"
+                )
+            else:
+                await message.answer(
+                    "Promo code created.\n"
+                    f"Use payload in /start: {data['promo_code']}"
+                )
+        except asyncpg.UniqueViolationError:
+            await message.answer("Promo code already exists. Choose another code.")
+        finally:
+            await state.clear()
+
+    @router.callback_query(F.data == "admin:pw:add")
     async def admin_create_prompt_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
             return
@@ -706,6 +1078,8 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
+        await state.clear()
+        await state.update_data(admin_mode="create", editing_prompt_id=None)
         await callback.message.answer("Send prompt title:")
         await state.set_state(AdminStates.waiting_prompt_title)
         await callback.answer()
@@ -744,6 +1118,9 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             variable_descriptions=prompt.get("variable_descriptions") or {},
             reference_photo_file_id=prompt["reference_photo_file_id"],
             awaiting_custom_for=None,
+            request_user_id=callback.from_user.id,
+            request_username=callback.from_user.username or "",
+            request_full_name=callback.from_user.full_name or "",
         )
 
         if prompt["reference_photo_file_id"]:
@@ -762,7 +1139,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         await ask_next_variable(callback.message, state)
 
-    @router.callback_query(F.data == "admin:delete_prompt")
+    @router.callback_query(F.data == "admin:pw:delete")
     async def admin_delete_prompt_start(callback: CallbackQuery) -> None:
         if not callback.message:
             return
@@ -785,6 +1162,56 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             "Select prompt to delete:",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
         )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:pw:edit")
+    async def admin_edit_prompt_start(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        prompts = await repo.list_prompts()
+        if not prompts:
+            await callback.message.answer("No prompts to edit.")
+            await callback.answer()
+            return
+        buttons = [
+            [InlineKeyboardButton(text=f"Edit: {p['title']}", callback_data=f"admin:edit:{p['id']}")]
+            for p in prompts
+        ]
+        await callback.message.answer(
+            "Select prompt to edit:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:edit:"))
+    async def admin_edit_prompt_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+
+        await state.clear()
+        await state.update_data(admin_mode="edit", editing_prompt_id=prompt_id)
+        await callback.message.answer(
+            f"Editing prompt: {prompt['title']}\n"
+            "Send new prompt title:"
+        )
+        await state.set_state(AdminStates.waiting_prompt_title)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:delete:"))
@@ -988,14 +1415,25 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         data = await state.get_data()
         user = await repo.get_user(message.from_user.id)
         try:
-            await repo.insert_prompt(
-                title=data["prompt_title"],
-                template=data["prompt_template"],
-                variable_descriptions=data.get("variable_descriptions", {}),
-                reference_photo_file_id=None,
-                created_by=user["tg_id"] if user else message.from_user.id,
-            )
-            await message.answer("Prompt created.")
+            admin_mode = data.get("admin_mode", "create")
+            if admin_mode == "edit" and data.get("editing_prompt_id") is not None:
+                await repo.update_prompt(
+                    prompt_id=int(data["editing_prompt_id"]),
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=data.get("variable_descriptions", {}),
+                    reference_photo_file_id=None,
+                )
+                await message.answer("Prompt updated.")
+            else:
+                await repo.insert_prompt(
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=data.get("variable_descriptions", {}),
+                    reference_photo_file_id=None,
+                    created_by=user["tg_id"] if user else message.from_user.id,
+                )
+                await message.answer("Prompt created.")
         except asyncpg.UniqueViolationError:
             await message.answer("Prompt with this title already exists.")
         finally:
@@ -1007,14 +1445,25 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         user = await repo.get_user(message.from_user.id)
         file_id = message.photo[-1].file_id
         try:
-            await repo.insert_prompt(
-                title=data["prompt_title"],
-                template=data["prompt_template"],
-                variable_descriptions=data.get("variable_descriptions", {}),
-                reference_photo_file_id=file_id,
-                created_by=user["tg_id"] if user else message.from_user.id,
-            )
-            await message.answer("Prompt created with reference image.")
+            admin_mode = data.get("admin_mode", "create")
+            if admin_mode == "edit" and data.get("editing_prompt_id") is not None:
+                await repo.update_prompt(
+                    prompt_id=int(data["editing_prompt_id"]),
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=data.get("variable_descriptions", {}),
+                    reference_photo_file_id=file_id,
+                )
+                await message.answer("Prompt updated with reference image.")
+            else:
+                await repo.insert_prompt(
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=data.get("variable_descriptions", {}),
+                    reference_photo_file_id=file_id,
+                    created_by=user["tg_id"] if user else message.from_user.id,
+                )
+                await message.answer("Prompt created with reference image.")
         except asyncpg.UniqueViolationError:
             await message.answer("Prompt with this title already exists.")
         finally:
