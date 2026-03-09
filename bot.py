@@ -93,6 +93,8 @@ class AuthStates(StatesGroup):
 class AdminStates(StatesGroup):
     waiting_prompt_title = State()
     waiting_prompt_template = State()
+    waiting_prompt_edit_title = State()
+    waiting_prompt_edit_template = State()
     waiting_variable_description = State()
     waiting_text_options = State()
     waiting_text_allow_custom = State()
@@ -629,6 +631,19 @@ def build_prompt_item_menu(prompt_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
+            [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
+            [InlineKeyboardButton(text="Edit variable descriptions", callback_data=f"admin:editpart:variables:{prompt_id}")],
+            [InlineKeyboardButton(text="Replace reference image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
+            [InlineKeyboardButton(text="Remove reference image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
+            [InlineKeyboardButton(text="Back to list", callback_data="admin:prompt_work")],
+        ]
+    )
+
+
 def build_promo_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -717,6 +732,32 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             "type": var_type,
         }
 
+    def normalize_variable_descriptions_for_template(
+        raw_descriptions: Any,
+        variables: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        existing = ensure_dict(raw_descriptions)
+        normalized: dict[str, Any] = {}
+        for var in variables:
+            token = variable_token(var)
+            cfg = get_variable_config(existing, token, var["type"])
+            cfg["type"] = var["type"]
+            if var["type"] != "text":
+                cfg["options"] = []
+                cfg["allow_custom"] = True
+            normalized[token] = cfg
+        return normalized
+
+    async def show_prompt_edit_actions(message: Message, prompt: asyncpg.Record) -> None:
+        reference_text = "set" if prompt["reference_photo_file_id"] else "not set"
+        await message.answer(
+            "Prompt edit menu:\n"
+            f"Title: {prompt['title']}\n"
+            f"Reference image: {reference_text}\n"
+            "Choose what to change:",
+            reply_markup=build_prompt_edit_menu(int(prompt["id"])),
+        )
+
     def build_text_options_keyboard(options: list[str], allow_custom: bool) -> InlineKeyboardMarkup:
         keyboard = [
             [InlineKeyboardButton(text=opt, callback_data=f"gen:opt:{idx}")]
@@ -771,10 +812,25 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         idx: int = data.get("var_desc_idx", 0)
         if idx >= len(variables):
-            await state.set_state(AdminStates.waiting_prompt_reference)
-            await message.answer(
-                "Send optional reference image now, or type /skip to continue without it."
-            )
+            admin_mode = data.get("admin_mode", "create")
+            if admin_mode == "edit_variables" and data.get("editing_prompt_id") is not None:
+                await repo.update_prompt(
+                    prompt_id=int(data["editing_prompt_id"]),
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
+                    reference_photo_file_id=data.get("reference_photo_file_id"),
+                )
+                prompt = await repo.get_prompt_by_id(int(data["editing_prompt_id"]))
+                await state.clear()
+                await message.answer("Variable descriptions updated.")
+                if prompt:
+                    await show_prompt_edit_actions(message, prompt)
+            else:
+                await state.set_state(AdminStates.waiting_prompt_reference)
+                await message.answer(
+                    "Send optional reference image now, or type /skip to continue without it."
+                )
             return
 
         var = variables[idx]
@@ -1399,12 +1455,178 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
 
         await state.clear()
-        await state.update_data(admin_mode="edit", editing_prompt_id=prompt_id)
-        await callback.message.answer(
-            f"Editing prompt: {prompt['title']}\n"
-            "Send new prompt title:"
+        await show_prompt_edit_actions(callback.message, prompt)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:title:"))
+    async def admin_edit_prompt_title_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(
+            editing_prompt_id=prompt_id,
+            prompt_title=prompt["title"],
+            prompt_template=prompt["template"],
+            variable_descriptions=ensure_dict(prompt.get("variable_descriptions") or {}),
+            reference_photo_file_id=prompt["reference_photo_file_id"],
         )
-        await state.set_state(AdminStates.waiting_prompt_title)
+        await state.set_state(AdminStates.waiting_prompt_edit_title)
+        await callback.message.answer(
+            f"Current title: {prompt['title']}\n"
+            "Send new title:"
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:template:"))
+    async def admin_edit_prompt_template_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(
+            editing_prompt_id=prompt_id,
+            prompt_title=prompt["title"],
+            prompt_template=prompt["template"],
+            variable_descriptions=ensure_dict(prompt.get("variable_descriptions") or {}),
+            reference_photo_file_id=prompt["reference_photo_file_id"],
+        )
+        await state.set_state(AdminStates.waiting_prompt_edit_template)
+        await callback.message.answer(
+            "Send new template.\n"
+            "- Use [var] for image variables\n"
+            "- Use <var> for text variables"
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:variables:"))
+    async def admin_edit_prompt_variables_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        template = prompt["template"]
+        variables = extract_variables(template)
+        descriptions = normalize_variable_descriptions_for_template(
+            prompt.get("variable_descriptions") or {},
+            variables,
+        )
+        await state.clear()
+        await state.update_data(
+            admin_mode="edit_variables",
+            editing_prompt_id=prompt_id,
+            prompt_title=prompt["title"],
+            prompt_template=template,
+            prompt_variables=variables,
+            variable_descriptions=descriptions,
+            reference_photo_file_id=prompt["reference_photo_file_id"],
+            var_desc_idx=0,
+        )
+        if not variables:
+            await callback.message.answer("Template has no variables to edit.")
+            await show_prompt_edit_actions(callback.message, prompt)
+            await callback.answer()
+            return
+        await state.set_state(AdminStates.waiting_variable_description)
+        await ask_admin_next_var_description(callback.message, state)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:ref:set:"))
+    async def admin_edit_prompt_reference_set_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(
+            admin_mode="edit_reference",
+            editing_prompt_id=prompt_id,
+            prompt_title=prompt["title"],
+            prompt_template=prompt["template"],
+            variable_descriptions=ensure_dict(prompt.get("variable_descriptions") or {}),
+            reference_photo_file_id=prompt["reference_photo_file_id"],
+        )
+        await state.set_state(AdminStates.waiting_prompt_reference)
+        await callback.message.answer(
+            "Send new reference image now.\n"
+            "Use /skip to cancel reference update."
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:ref:clear:"))
+    async def admin_edit_prompt_reference_clear(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        await repo.update_prompt(
+            prompt_id=prompt_id,
+            title=prompt["title"],
+            template=prompt["template"],
+            variable_descriptions=ensure_dict(prompt.get("variable_descriptions") or {}),
+            reference_photo_file_id=None,
+        )
+        updated_prompt = await repo.get_prompt_by_id(prompt_id)
+        await callback.message.answer("Reference image removed.")
+        if updated_prompt:
+            await show_prompt_edit_actions(callback.message, updated_prompt)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:delete:"))
@@ -1470,16 +1692,73 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.set_state(AdminStates.waiting_variable_description)
         await ask_admin_next_var_description(message, state)
 
+    @router.message(AdminStates.waiting_prompt_edit_title)
+    async def admin_prompt_edit_title_value(message: Message, state: FSMContext) -> None:
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer("Title cannot be empty. Send new title:")
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            await state.clear()
+            return
+        try:
+            await repo.update_prompt(
+                prompt_id=int(prompt_id),
+                title=title,
+                template=data["prompt_template"],
+                variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
+                reference_photo_file_id=data.get("reference_photo_file_id"),
+            )
+            updated_prompt = await repo.get_prompt_by_id(int(prompt_id))
+            await state.clear()
+            await message.answer("Title updated.")
+            if updated_prompt:
+                await show_prompt_edit_actions(message, updated_prompt)
+        except asyncpg.UniqueViolationError:
+            await message.answer("Prompt with this title already exists. Send another title.")
+
+    @router.message(AdminStates.waiting_prompt_edit_template)
+    async def admin_prompt_edit_template_value(message: Message, state: FSMContext) -> None:
+        template = (message.text or "").strip()
+        if not template:
+            await message.answer("Template cannot be empty. Send new template:")
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            await state.clear()
+            return
+
+        variables = extract_variables(template)
+        descriptions = normalize_variable_descriptions_for_template(
+            data.get("variable_descriptions", {}),
+            variables,
+        )
+
+        await repo.update_prompt(
+            prompt_id=int(prompt_id),
+            title=data["prompt_title"],
+            template=template,
+            variable_descriptions=descriptions,
+            reference_photo_file_id=data.get("reference_photo_file_id"),
+        )
+        updated_prompt = await repo.get_prompt_by_id(int(prompt_id))
+        await state.clear()
+        await message.answer("Template updated. Variable descriptions were kept for matching variables.")
+        if updated_prompt:
+            await show_prompt_edit_actions(message, updated_prompt)
+
     @router.message(AdminStates.waiting_variable_description, Command("skip"))
     async def admin_var_desc_skip(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         idx: int = data.get("var_desc_idx", 0)
         if idx >= len(variables):
-            await state.set_state(AdminStates.waiting_prompt_reference)
-            await message.answer(
-                "Send optional reference image now, or type /skip to continue without it."
-            )
+            await ask_admin_next_var_description(message, state)
             return
 
         var = variables[idx]
@@ -1509,10 +1788,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         idx: int = data.get("var_desc_idx", 0)
         if idx >= len(variables):
-            await state.set_state(AdminStates.waiting_prompt_reference)
-            await message.answer(
-                "Send optional reference image now, or type /skip to continue without it."
-            )
+            await ask_admin_next_var_description(message, state)
             return
         var = variables[idx]
         token = variable_token(var)
@@ -1534,10 +1810,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         idx: int = data.get("var_desc_idx", 0)
         if idx >= len(variables):
-            await state.set_state(AdminStates.waiting_prompt_reference)
-            await message.answer(
-                "Send optional reference image now, or type /skip to continue without it."
-            )
+            await ask_admin_next_var_description(message, state)
             return
         var = variables[idx]
         token = variable_token(var)
@@ -1607,14 +1880,20 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
     async def admin_prompt_skip_reference(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         user = await repo.get_user(message.from_user.id)
+        prompt_id = data.get("editing_prompt_id")
         try:
             admin_mode = data.get("admin_mode", "create")
-            if admin_mode == "edit" and data.get("editing_prompt_id") is not None:
+            if admin_mode == "edit_reference" and prompt_id is not None:
+                await message.answer("Reference update cancelled.")
+                prompt = await repo.get_prompt_by_id(int(prompt_id))
+                if prompt:
+                    await show_prompt_edit_actions(message, prompt)
+            elif admin_mode == "edit" and prompt_id is not None:
                 await repo.update_prompt(
-                    prompt_id=int(data["editing_prompt_id"]),
+                    prompt_id=int(prompt_id),
                     title=data["prompt_title"],
                     template=data["prompt_template"],
-                    variable_descriptions=data.get("variable_descriptions", {}),
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
                     reference_photo_file_id=None,
                 )
                 await message.answer("Prompt updated.")
@@ -1622,7 +1901,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
                 await repo.insert_prompt(
                     title=data["prompt_title"],
                     template=data["prompt_template"],
-                    variable_descriptions=data.get("variable_descriptions", {}),
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
                     reference_photo_file_id=None,
                     created_by=user["tg_id"] if user else message.from_user.id,
                 )
@@ -1636,23 +1915,27 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
     async def admin_prompt_with_reference(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         user = await repo.get_user(message.from_user.id)
+        prompt_id = data.get("editing_prompt_id")
         file_id = message.photo[-1].file_id
         try:
             admin_mode = data.get("admin_mode", "create")
-            if admin_mode == "edit" and data.get("editing_prompt_id") is not None:
+            if admin_mode in {"edit", "edit_reference"} and prompt_id is not None:
                 await repo.update_prompt(
-                    prompt_id=int(data["editing_prompt_id"]),
+                    prompt_id=int(prompt_id),
                     title=data["prompt_title"],
                     template=data["prompt_template"],
-                    variable_descriptions=data.get("variable_descriptions", {}),
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
                     reference_photo_file_id=file_id,
                 )
                 await message.answer("Prompt updated with reference image.")
+                prompt = await repo.get_prompt_by_id(int(prompt_id))
+                if prompt:
+                    await show_prompt_edit_actions(message, prompt)
             else:
                 await repo.insert_prompt(
                     title=data["prompt_title"],
                     template=data["prompt_template"],
-                    variable_descriptions=data.get("variable_descriptions", {}),
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
                     reference_photo_file_id=file_id,
                     created_by=user["tg_id"] if user else message.from_user.id,
                 )
