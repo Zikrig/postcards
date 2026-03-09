@@ -473,6 +473,41 @@ class Repo:
                 created_by,
             )
 
+    async def list_promo_codes(self) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("SELECT * FROM promo_codes ORDER BY id DESC")
+
+    async def get_promo_code_by_id(self, promo_id: int) -> Optional[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("SELECT * FROM promo_codes WHERE id = $1", promo_id)
+
+    async def update_promo_code(
+        self,
+        promo_id: int,
+        code: str,
+        credits_amount: int,
+        max_uses: Optional[int],
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE promo_codes
+                SET code = $1,
+                    credits_amount = $2,
+                    max_uses = $3
+                WHERE id = $4
+                """,
+                code,
+                credits_amount,
+                max_uses,
+                promo_id,
+            )
+
+    async def delete_promo_code(self, promo_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM promo_codes WHERE id = $1", promo_id)
+            return result.endswith("1")
+
     async def redeem_promo_code(self, code: str, user_tg_id: int) -> tuple[bool, str, int]:
         """
         Returns: (success, message, granted_credits)
@@ -557,9 +592,26 @@ def build_prompt_work_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Add prompt", callback_data="admin:pw:add")],
-            [InlineKeyboardButton(text="Edit prompt", callback_data="admin:pw:edit")],
-            [InlineKeyboardButton(text="Delete prompt", callback_data="admin:pw:delete")],
             [InlineKeyboardButton(text="Back", callback_data="admin:pw:back")],
+        ]
+    )
+
+
+def build_prompt_list_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=p["title"], callback_data=f"admin:pw:item:{p['id']}")]
+        for p in prompts
+    ]
+    rows.extend(build_prompt_work_menu().inline_keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_prompt_item_menu(prompt_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
+            [InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")],
+            [InlineKeyboardButton(text="Back to list", callback_data="admin:prompt_work")],
         ]
     )
 
@@ -570,6 +622,25 @@ def build_promo_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Create single-user promo", callback_data="admin:promo:create:single")],
             [InlineKeyboardButton(text="Create multi-user promo", callback_data="admin:promo:create:multi")],
             [InlineKeyboardButton(text="Back", callback_data="admin:promo:back")],
+        ]
+    )
+
+
+def build_promo_list_menu(promos: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=p["code"], callback_data=f"admin:promo:item:{p['id']}")]
+        for p in promos
+    ]
+    rows.extend(build_promo_menu().inline_keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_promo_item_menu(promo_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Edit", callback_data=f"admin:promo:edit:{promo_id}")],
+            [InlineKeyboardButton(text="Delete", callback_data=f"admin:promo:delete:{promo_id}")],
+            [InlineKeyboardButton(text="Back to list", callback_data="admin:promo_menu")],
         ]
     )
 
@@ -948,7 +1019,14 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        await callback.message.answer("Prompt work:", reply_markup=build_prompt_work_menu())
+        prompts = await repo.list_prompts()
+        if prompts:
+            await callback.message.answer("Prompt list:", reply_markup=build_prompt_list_menu(prompts))
+        else:
+            await callback.message.answer(
+                "Prompt list is empty.",
+                reply_markup=build_prompt_work_menu(),
+            )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:pw:back")
@@ -966,7 +1044,14 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        await callback.message.answer("Promo codes:", reply_markup=build_promo_menu())
+        promos = await repo.list_promo_codes()
+        if promos:
+            await callback.message.answer("Promo code list:", reply_markup=build_promo_list_menu(promos))
+        else:
+            await callback.message.answer(
+                "Promo code list is empty.",
+                reply_markup=build_promo_menu(),
+            )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:promo:back")
@@ -986,6 +1071,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         await state.clear()
         await state.update_data(promo_mode="single")
+        await state.update_data(promo_action="create", editing_promo_id=None)
         await state.set_state(AdminStates.waiting_promo_code)
         await callback.message.answer("Send promo code text (for start link payload).")
         await callback.answer()
@@ -1000,8 +1086,94 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         await state.clear()
         await state.update_data(promo_mode="multi")
+        await state.update_data(promo_action="create", editing_promo_id=None)
         await state.set_state(AdminStates.waiting_promo_code)
         await callback.message.answer("Send promo code text (for start link payload).")
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:promo:item:"))
+    async def admin_promo_item_actions(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            promo_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid promo id", show_alert=True)
+            return
+        promo = await repo.get_promo_code_by_id(promo_id)
+        if not promo:
+            await callback.answer("Promo not found", show_alert=True)
+            return
+        max_uses = promo["max_uses"]
+        max_uses_text = "unlimited" if max_uses is None else str(max_uses)
+        await callback.message.answer(
+            "Promo code details:\n"
+            f"Code: {promo['code']}\n"
+            f"Credits: {promo['credits_amount']}\n"
+            f"Uses: {promo['uses_count']}/{max_uses_text}\n"
+            f"Active: {promo['is_active']}",
+            reply_markup=build_promo_item_menu(promo_id),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:promo:edit:"))
+    async def admin_promo_edit_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            promo_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid promo id", show_alert=True)
+            return
+        promo = await repo.get_promo_code_by_id(promo_id)
+        if not promo:
+            await callback.answer("Promo not found", show_alert=True)
+            return
+
+        mode = "single" if promo["max_uses"] == 1 else "multi"
+        await state.clear()
+        await state.update_data(
+            promo_mode=mode,
+            promo_action="edit",
+            editing_promo_id=promo_id,
+        )
+        await state.set_state(AdminStates.waiting_promo_code)
+        await callback.message.answer(
+            f"Editing promo '{promo['code']}'.\n"
+            "Send new promo code text:"
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:promo:delete:"))
+    async def admin_promo_delete(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            promo_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid promo id", show_alert=True)
+            return
+        promo = await repo.get_promo_code_by_id(promo_id)
+        if not promo:
+            await callback.answer("Promo not found", show_alert=True)
+            return
+        deleted = await repo.delete_promo_code(promo_id)
+        if deleted:
+            await callback.message.answer(f"Promo deleted: {promo['code']}")
+        else:
+            await callback.message.answer("Promo was not deleted.")
         await callback.answer()
 
     @router.message(AdminStates.waiting_promo_code)
@@ -1047,22 +1219,32 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         data = await state.get_data()
         user = await repo.get_user(message.from_user.id)
         try:
-            await repo.create_promo_code(
-                code=str(data["promo_code"]),
-                credits_amount=int(data["promo_credits"]),
-                max_uses=data.get("promo_max_uses"),
-                created_by=user["tg_id"] if user else message.from_user.id,
-            )
+            promo_action = data.get("promo_action", "create")
+            if promo_action == "edit" and data.get("editing_promo_id") is not None:
+                await repo.update_promo_code(
+                    promo_id=int(data["editing_promo_id"]),
+                    code=str(data["promo_code"]),
+                    credits_amount=int(data["promo_credits"]),
+                    max_uses=data.get("promo_max_uses"),
+                )
+            else:
+                await repo.create_promo_code(
+                    code=str(data["promo_code"]),
+                    credits_amount=int(data["promo_credits"]),
+                    max_uses=data.get("promo_max_uses"),
+                    created_by=user["tg_id"] if user else message.from_user.id,
+                )
             me = await bot.get_me()
+            header = "Promo code updated." if promo_action == "edit" else "Promo code created."
             if me.username:
                 link = f"https://t.me/{me.username}?start={data['promo_code']}"
                 await message.answer(
-                    "Promo code created.\n"
+                    f"{header}\n"
                     f"Start link: {link}"
                 )
             else:
                 await message.answer(
-                    "Promo code created.\n"
+                    f"{header}\n"
                     f"Use payload in /start: {data['promo_code']}"
                 )
         except asyncpg.UniqueViolationError:
@@ -1082,6 +1264,29 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await state.update_data(admin_mode="create", editing_prompt_id=None)
         await callback.message.answer("Send prompt title:")
         await state.set_state(AdminStates.waiting_prompt_title)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:pw:item:"))
+    async def admin_prompt_item_actions(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        await callback.message.answer(
+            f"Prompt: {prompt['title']}",
+            reply_markup=build_prompt_item_menu(prompt_id),
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("prompt:select:"))
@@ -1138,54 +1343,6 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             await run_generation(callback.message, state)
             return
         await ask_next_variable(callback.message, state)
-
-    @router.callback_query(F.data == "admin:pw:delete")
-    async def admin_delete_prompt_start(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
-
-        prompts = await repo.list_prompts()
-        if not prompts:
-            await callback.message.answer("No prompts to delete.")
-            await callback.answer()
-            return
-
-        buttons = [
-            [InlineKeyboardButton(text=f"Delete: {p['title']}", callback_data=f"admin:delete:{p['id']}")]
-            for p in prompts
-        ]
-        await callback.message.answer(
-            "Select prompt to delete:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        )
-        await callback.answer()
-
-    @router.callback_query(F.data == "admin:pw:edit")
-    async def admin_edit_prompt_start(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
-        prompts = await repo.list_prompts()
-        if not prompts:
-            await callback.message.answer("No prompts to edit.")
-            await callback.answer()
-            return
-        buttons = [
-            [InlineKeyboardButton(text=f"Edit: {p['title']}", callback_data=f"admin:edit:{p['id']}")]
-            for p in prompts
-        ]
-        await callback.message.answer(
-            "Select prompt to edit:",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
-        )
-        await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:edit:"))
     async def admin_edit_prompt_pick(callback: CallbackQuery, state: FSMContext) -> None:
