@@ -142,6 +142,19 @@ def render_prompt(template: str, answers: dict[str, str]) -> str:
     return result
 
 
+def ensure_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
 class EvoClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -676,11 +689,12 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         await message.answer("Select a prompt:", reply_markup=build_main_menu(prompts))
 
     def get_variable_config(
-        raw_configs: dict[str, Any],
+        raw_configs: Any,
         token: str,
         var_type: str,
     ) -> dict[str, Any]:
-        raw = raw_configs.get(token)
+        configs = ensure_dict(raw_configs)
+        raw = configs.get(token)
         if isinstance(raw, str):
             # Backward compatibility with old format: {"<var>": "description"}
             return {
@@ -784,7 +798,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         var_name = variable["name"]
         var_type = variable["type"]
         token = variable_token(variable)
-        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
         config = get_variable_config(variable_descriptions, token, var_type)
         description = str(config.get("description") or "").strip()
         options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
@@ -1320,7 +1334,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             current_idx=0,
             answers={},
             image_urls=[],
-            variable_descriptions=prompt.get("variable_descriptions") or {},
+            variable_descriptions=ensure_dict(prompt.get("variable_descriptions") or {}),
             reference_photo_file_id=prompt["reference_photo_file_id"],
             awaiting_custom_for=None,
             request_user_id=callback.from_user.id,
@@ -1448,7 +1462,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
 
         var = variables[idx]
         token = variable_token(var)
-        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
         variable_descriptions[token] = {
             "description": "",
             "options": [],
@@ -1480,7 +1494,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         var = variables[idx]
         token = variable_token(var)
-        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
         existing = get_variable_config(descriptions, token, var["type"])
         existing["description"] = text
         existing["type"] = var["type"]
@@ -1505,7 +1519,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
         var = variables[idx]
         token = variable_token(var)
-        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
         existing = get_variable_config(descriptions, token, "text")
         existing["options"] = []
         existing["allow_custom"] = True
@@ -1530,7 +1544,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         idx: int = data.get("var_desc_idx", 0)
         var = variables[idx]
         token = variable_token(var)
-        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
         existing = get_variable_config(descriptions, token, "text")
         existing["options"] = options
         descriptions[token] = existing
@@ -1552,7 +1566,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         idx: int = data.get("var_desc_idx", 0)
         var = variables[idx]
         token = variable_token(var)
-        descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
         existing = get_variable_config(descriptions, token, "text")
         options = [str(x) for x in (existing.get("options") or []) if str(x).strip()]
         if not options:
@@ -1656,7 +1670,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
 
         token = variable_token(variable)
-        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
         config = get_variable_config(variable_descriptions, token, "text")
         options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
 
@@ -1696,7 +1710,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             return
 
         token = variable_token(variable)
-        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
         config = get_variable_config(variable_descriptions, token, "text")
         allow_custom = bool(config.get("allow_custom", True))
         if not allow_custom:
@@ -1723,7 +1737,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         answers: dict[str, str] = data.get("answers", {})
         image_urls: list[str] = data.get("image_urls", [])
         token = variable_token(variable)
-        variable_descriptions: dict[str, Any] = data.get("variable_descriptions", {})
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
         config = get_variable_config(variable_descriptions, token, var_type)
         options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
         allow_custom = bool(config.get("allow_custom", True))
