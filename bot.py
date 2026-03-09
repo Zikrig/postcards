@@ -249,6 +249,14 @@ class Repo:
                 ADD COLUMN IF NOT EXISTS variable_descriptions JSONB NOT NULL DEFAULT '{}'::jsonb;
                 """
             )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bot_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+                """
+            )
 
     async def upsert_user(
         self,
@@ -318,6 +326,25 @@ class Repo:
                 created_by,
             )
 
+    async def get_state_value(self, key: str) -> Optional[str]:
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT value FROM bot_state WHERE key = $1", key)
+            if not row:
+                return None
+            return row["value"]
+
+    async def set_state_value(self, key: str, value: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO bot_state (key, value)
+                VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                key,
+                value,
+            )
+
 
 def build_main_menu(prompt_titles: list[str]) -> ReplyKeyboardMarkup:
     buttons = [[KeyboardButton(text=title)] for title in prompt_titles]
@@ -338,6 +365,7 @@ def build_admin_menu() -> InlineKeyboardMarkup:
 
 def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> Router:
     router = Router()
+    BALANCE_BUCKET_KEY = "last_user_remaining_bucket_20"
 
     async def ensure_user(message: Message) -> asyncpg.Record:
         tg_user = message.from_user
@@ -434,21 +462,63 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             for url in results:
                 await message.answer_photo(photo=url)
 
-            credits = await evo.get_credits()
-            token = (credits.get("data") or {}).get("token") or {}
-            user = (credits.get("data") or {}).get("user") or {}
-            await message.answer(
-                "Balance:\n"
-                f"- Token remaining: {token.get('remaining_credits')}\n"
-                f"- Token used: {token.get('used_credits')}\n"
-                f"- User remaining: {user.get('remaining_credits')}\n"
-                f"- User used: {user.get('used_credits')}"
-            )
+            await maybe_notify_admins_balance_checkpoint(message)
         except Exception as e:
             await message.answer(f"Error: {e}")
         finally:
             await state.clear()
             await show_prompt_buttons(message)
+
+    async def maybe_notify_admins_balance_checkpoint(message: Message) -> None:
+        """
+        Notify admins only when user remaining credits cross the next multiple of 20.
+        """
+        credits = await evo.get_credits()
+        user_data = (credits.get("data") or {}).get("user") or {}
+        remaining_raw = user_data.get("remaining_credits")
+        if remaining_raw is None:
+            return
+
+        try:
+            remaining = float(remaining_raw)
+        except (TypeError, ValueError):
+            return
+
+        current_bucket = int(remaining // 20)
+        prev_bucket_raw = await repo.get_state_value(BALANCE_BUCKET_KEY)
+
+        # First observation: remember bucket silently (no notification)
+        if prev_bucket_raw is None:
+            await repo.set_state_value(BALANCE_BUCKET_KEY, str(current_bucket))
+            return
+
+        try:
+            prev_bucket = int(prev_bucket_raw)
+        except ValueError:
+            prev_bucket = current_bucket
+
+        # Notify only when remaining balance crossed to a lower 20-step bucket.
+        if current_bucket < prev_bucket:
+            crossed_value = current_bucket * 20
+            tg_user = message.from_user
+            user_label = "unknown user"
+            if tg_user:
+                username = f"@{tg_user.username}" if tg_user.username else "no_username"
+                user_label = f"{tg_user.full_name} ({username}, id={tg_user.id})"
+
+            admin_text = (
+                "Balance checkpoint reached.\n"
+                f"Triggered by: {user_label}\n"
+                f"User remaining credits: {remaining}\n"
+                f"Crossed threshold: <= {crossed_value}"
+            )
+            for admin_id in settings.admin_ids:
+                try:
+                    await bot.send_message(admin_id, admin_text)
+                except Exception:
+                    logging.exception("Failed to send admin balance notification to %s", admin_id)
+
+        await repo.set_state_value(BALANCE_BUCKET_KEY, str(current_bucket))
 
     async def telegram_file_url(file_id: str) -> str:
         file = await bot.get_file(file_id)
@@ -474,7 +544,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
             "- You choose a prompt from buttons\n"
             "- Variables in [ ] mean image input\n"
             "- Variables in < > mean text input\n"
-            "- I generate an image and show your current balance\n\n"
+            "- I generate an image\n\n"
             "Please enter password to continue:"
         )
         await state.set_state(AuthStates.waiting_password)
