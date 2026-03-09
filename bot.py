@@ -10,6 +10,7 @@ from typing import Any, Optional
 import aiohttp
 import asyncpg
 from aiogram import Bot, Dispatcher, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -188,11 +189,18 @@ class EvoClient:
                     raise RuntimeError(f"Get task failed [{resp.status}]: {text}")
                 return await resp.json()
 
-    async def wait_for_completion(self, task_id: str) -> dict[str, Any]:
+    async def wait_for_completion(
+        self,
+        task_id: str,
+        on_progress: Optional[Any] = None,
+    ) -> dict[str, Any]:
         started = time.time()
         while True:
             details = await self.get_task(task_id)
             status = details.get("status")
+            progress = details.get("progress")
+            if on_progress is not None:
+                await on_progress(status, progress)
             if status in {"completed", "failed"}:
                 return details
             if time.time() - started > self.settings.task_timeout_seconds:
@@ -537,26 +545,57 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         prompt_title = data["prompt_title"]
 
         final_prompt = render_prompt(template, answers)
-        await message.answer(f"Generating image for prompt: {prompt_title}...")
+        progress_message = await message.answer(
+            f"Generating image for prompt: {prompt_title}\nStatus: queued"
+        )
+        last_progress_text = progress_message.text or ""
 
         try:
             task_id = await evo.create_task(final_prompt, image_urls=image_urls)
-            details = await evo.wait_for_completion(task_id)
+
+            async def update_progress(status: Any, progress: Any) -> None:
+                nonlocal last_progress_text
+                status_text = str(status or "processing")
+                progress_text = "?"
+                if progress is not None:
+                    progress_text = str(progress)
+                text = (
+                    f"Generating image for prompt: {prompt_title}\n"
+                    f"Status: {status_text}\n"
+                    f"Progress: {progress_text}%"
+                )
+                if text == last_progress_text:
+                    return
+                try:
+                    await progress_message.edit_text(text)
+                    last_progress_text = text
+                except TelegramBadRequest:
+                    # Ignore "message is not modified" and similar harmless edit errors.
+                    pass
+
+            details = await evo.wait_for_completion(task_id, on_progress=update_progress)
 
             if details.get("status") != "completed":
+                await progress_message.delete()
                 await message.answer(f"Generation failed: {details}")
                 return
 
             results = details.get("results") or []
             if not results:
+                await progress_message.delete()
                 await message.answer("Generation completed, but no images were returned.")
                 return
 
+            await progress_message.delete()
             for url in results:
                 await message.answer_photo(photo=url)
 
             await maybe_notify_admins_balance_checkpoint(message)
         except Exception as e:
+            try:
+                await progress_message.delete()
+            except Exception:
+                pass
             await message.answer(f"Error: {e}")
         finally:
             await state.clear()
