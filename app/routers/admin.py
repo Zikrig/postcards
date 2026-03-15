@@ -1,5 +1,6 @@
 """Admin handlers: prompts, feach, promo, edit, delete, import, test."""
 import json
+import logging
 import os
 import random
 from typing import Any, Optional
@@ -33,6 +34,7 @@ from app.utils import (
     get_feach_option_text,
     make_option_key,
     normalize_feach_for_storage,
+    render_prompt,
     variable_token,
 )
 
