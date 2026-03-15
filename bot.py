@@ -1706,10 +1706,16 @@ def create_router(
         feat = features[feat_key]
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
-        await callback.message.answer(
-            f"Variable: {varname}\nAbout: {about}",
-            reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
-        )
+        try:
+            await callback.message.edit_text(
+                f"Variable: {varname}\nAbout: {about}",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                f"Variable: {varname}\nAbout: {about}",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+            )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:opt:"))
@@ -1900,7 +1906,16 @@ def create_router(
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        await callback.message.answer("Done. Back to prompt.", reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active))
+        try:
+            await callback.message.edit_text(
+                "Done. Back to prompt.",
+                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Done. Back to prompt.",
+                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+            )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:optview:"))
