@@ -917,12 +917,11 @@ def build_feature_config_menu(
     feat_key: str,
     feature: dict[str, Any],
 ) -> InlineKeyboardMarkup:
-    """Option rows (text + green/red + Del), My own, Add, Done. Option view = show full text on click."""
+    """Option rows (text + green/red), My own, Don't specify, Add option, Del feature, Done, Back."""
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
     rows = []
     for opt_key, opt_val in opts.items():
-        # На кнопке — короткое имя (ключ ≤20 символов), по клику показываем содержание
         text_short = btn_label(opt_key, 20)
         enabled = get_feach_option_enabled(opt_val)
         rows.append([
@@ -931,11 +930,9 @@ def build_feature_config_menu(
                 text="🟢" if enabled else "🔴",
                 callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
             ),
-            InlineKeyboardButton(text="Del", callback_data=f"admin:optdel:{prompt_id}:{feat_key}:{opt_key}"),
         ])
     for i, c in enumerate(custom):
         opt_key = f"custom_{i}"
-        # Кастомные опции: на кнопке первые 20 символов текста
         text_short = btn_label(c.get("text", str(c)) if isinstance(c, dict) else str(c), 20)
         enabled = c.get("enabled", True) if isinstance(c, dict) else True
         rows.append([
@@ -944,7 +941,6 @@ def build_feature_config_menu(
                 text="🟢" if enabled else "🔴",
                 callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
             ),
-            InlineKeyboardButton(text="Del", callback_data=f"admin:optdel:{prompt_id}:{feat_key}:{opt_key}"),
         ])
     my_own = feature.get("my_own", True)
     rows.append([
@@ -957,6 +953,7 @@ def build_feature_config_menu(
         InlineKeyboardButton(text="ON" if dont_specify else "OFF", callback_data=f"admin:dontspecify:{prompt_id}:{feat_key}"),
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
+    rows.append([InlineKeyboardButton(text="Del feature", callback_data=f"admin:featdel:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:pw:item:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1798,8 +1795,8 @@ def create_router(
                 pass
         await callback.answer()
 
-    @router.callback_query(F.data.startswith("admin:optdel:"))
-    async def admin_opt_delete(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data.startswith("admin:featdel:"))
+    async def admin_feature_delete(callback: CallbackQuery) -> None:
         if not callback.message:
             return
         user = await repo.get_user(callback.from_user.id)
@@ -1807,7 +1804,7 @@ def create_router(
             await callback.answer("Admin only", show_alert=True)
             return
         parts = (callback.data or "").split(":")
-        if len(parts) < 5:
+        if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
             return
         try:
@@ -1816,7 +1813,6 @@ def create_router(
             await callback.answer("Invalid", show_alert=True)
             return
         feat_key = parts[3]
-        opt_key = parts[4]
         prompt = await repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
@@ -1826,43 +1822,39 @@ def create_router(
         if feat_key not in features:
             await callback.answer("Feature not found", show_alert=True)
             return
-        feat = features[feat_key]
-        if opt_key.startswith("custom_"):
-            custom = list(feat.get("custom") or [])
-            idx = int(opt_key.replace("custom_", "")) if opt_key.replace("custom_", "").isdigit() else -1
-            if 0 <= idx < len(custom):
-                custom.pop(idx)
-                feat["custom"] = custom
-            else:
-                await callback.answer("Option not found", show_alert=True)
-                return
-        else:
-            opts = feat.get("options") or {}
-            if opt_key not in opts:
-                await callback.answer("Option not found", show_alert=True)
-                return
-            del opts[opt_key]
-            feat["options"] = opts
+        del features[feat_key]
+        feach_data["features"] = features
         await repo.update_prompt_feach_data(prompt_id, feach_data)
         prompt = await repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer()
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
-        feat = feach_data.get("features", {}).get(feat_key, {})
-        varname = feat.get("varname", feat_key)
-        about = feat.get("about", "")
-        try:
-            await callback.message.edit_text(
-                f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
-            )
-        except TelegramBadRequest:
-            await callback.message.answer(
-                f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
-            )
-        await callback.answer("Deleted")
+        is_active = bool(prompt.get("is_active", True))
+        if feach_data.get("features"):
+            idea = feach_data.get("idea", "")
+            try:
+                await callback.message.edit_text(
+                    f"Prompt: {prompt['title']}\n\nIdea: {idea}",
+                    reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                )
+            except TelegramBadRequest:
+                await callback.message.answer(
+                    f"Prompt: {prompt['title']}\n\nIdea: {idea}",
+                    reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                )
+        else:
+            try:
+                await callback.message.edit_text(
+                    f"Prompt: {prompt['title']}",
+                    reply_markup=build_prompt_item_menu(prompt_id, is_active),
+                )
+            except TelegramBadRequest:
+                await callback.message.answer(
+                    f"Prompt: {prompt['title']}",
+                    reply_markup=build_prompt_item_menu(prompt_id, is_active),
+                )
+        await callback.answer("Feature deleted")
 
     @router.callback_query(F.data.startswith("admin:dontspecify:"))
     async def admin_dont_specify_toggle(callback: CallbackQuery) -> None:
