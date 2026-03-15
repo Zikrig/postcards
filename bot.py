@@ -735,7 +735,7 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     for feat_key, feat in features.items():
         label = str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key)
         rows.append([
-            InlineKeyboardButton(text=label, callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+            InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
         ])
     rows.append([
         InlineKeyboardButton(text="Generate final prompt", callback_data=f"admin:final:{prompt_id}"),
