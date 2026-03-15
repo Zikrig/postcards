@@ -209,6 +209,85 @@ def get_feach_option_enabled(opt_value: Any) -> bool:
     return True
 
 
+def build_prompt_export_payload(prompt_record: Any) -> dict[str, Any]:
+    """
+    Build export JSON: title, template, idea, features (feach-like).
+    No reference_photo_file_id, feach_data, example_file_ids, is_active.
+    """
+    title = str(prompt_record.get("title") or "")
+    template = str(prompt_record.get("template") or "")
+    var_desc = ensure_dict(prompt_record.get("variable_descriptions") or {})
+    variables = extract_variables(template)
+    features: dict[str, Any] = {}
+    for var in variables:
+        token = variable_token(var)
+        raw = var_desc.get(token)
+        if isinstance(raw, str):
+            config = {"description": raw, "options": [], "allow_custom": True}
+        elif isinstance(raw, dict):
+            config = {
+                "description": str(raw.get("description") or ""),
+                "options": [str(x) for x in (raw.get("options") or []) if str(x).strip()],
+                "allow_custom": bool(raw.get("allow_custom", True)),
+            }
+        else:
+            config = {"description": "", "options": [], "allow_custom": True}
+        key = var["name"].lower().replace(" ", "_")
+        options_obj: dict[str, str] = {}
+        for i, opt in enumerate(config["options"]):
+            options_obj[f"opt_{i}"] = opt
+        features[key] = {
+            "varname": var["name"],
+            "about": config["description"],
+            "options": options_obj,
+            "my_own": config["allow_custom"],
+        }
+    return {"title": title, "template": template, "idea": "", "features": features}
+
+
+def variable_descriptions_from_features(template: str, features: dict[str, Any]) -> dict[str, Any]:
+    """
+    Build variable_descriptions from template placeholders and feach-like features.
+    features: { "time_of_day": { "varname": "TIME_OF_DAY", "about": "...", "options": {...} | [...], "my_own": bool }, ... }
+    """
+    variables = extract_variables(template)
+    var_desc: dict[str, Any] = {}
+    for var in variables:
+        token = variable_token(var)
+        key = var["name"].lower().replace(" ", "_")
+        feat = (features or {}).get(key)
+        if not feat or not isinstance(feat, dict):
+            # try match by varname
+            name_upper = var["name"].upper().replace(" ", "_")
+            for f in (features or {}).values():
+                if isinstance(f, dict) and (f.get("varname") or "").upper().replace(" ", "_") == name_upper:
+                    feat = f
+                    break
+        if feat and isinstance(feat, dict):
+            about = str(feat.get("about") or "")
+            opts = feat.get("options")
+            if isinstance(opts, dict):
+                opts = [str(v) for v in opts.values() if str(v).strip()]
+            elif isinstance(opts, list):
+                opts = [str(x) for x in opts if str(x).strip()]
+            else:
+                opts = []
+            var_desc[token] = {
+                "description": about,
+                "options": opts,
+                "allow_custom": bool(feat.get("my_own", True)),
+                "type": var["type"],
+            }
+        else:
+            var_desc[token] = {
+                "description": "",
+                "options": [],
+                "allow_custom": True,
+                "type": var["type"],
+            }
+    return var_desc
+
+
 class EvoClient:
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -1949,30 +2028,7 @@ def create_router(
                 logging.warning("admin_export_prompt: prompt %s not found", prompt_id)
                 await callback.answer("Prompt not found", show_alert=True)
                 return
-            var_desc = prompt.get("variable_descriptions")
-            if hasattr(var_desc, "__iter__") and not isinstance(var_desc, (str, bytes)):
-                var_desc = dict(var_desc) if var_desc else {}
-            else:
-                var_desc = {}
-            feach = prompt.get("feach_data")
-            if feach is not None and hasattr(feach, "copy"):
-                feach = dict(feach)
-            elif feach is not None and not isinstance(feach, dict):
-                feach = None
-            ex_ids = prompt.get("example_file_ids")
-            if isinstance(ex_ids, list):
-                ex_ids = list(ex_ids)
-            else:
-                ex_ids = []
-            payload = {
-                "title": str(prompt["title"] or ""),
-                "template": str(prompt["template"] or ""),
-                "variable_descriptions": var_desc,
-                "is_active": bool(prompt.get("is_active", True)),
-                "reference_photo_file_id": prompt.get("reference_photo_file_id"),
-                "feach_data": feach,
-                "example_file_ids": ex_ids,
-            }
+            payload = build_prompt_export_payload(prompt)
             logging.info("admin_export_prompt: payload built for prompt_id=%s (title=%r)", prompt_id, payload["title"])
             from io import BytesIO
             buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8"))
@@ -2032,27 +2088,33 @@ def create_router(
             await state.clear()
             return
         template = payload.get("template") or ""
-        var_descriptions = ensure_dict(payload.get("variable_descriptions") or {})
-        is_active = bool(payload.get("is_active", True))
-        ref_id = payload.get("reference_photo_file_id")
-        feach_data = payload.get("feach_data")
-        example_ids = payload.get("example_file_ids")
-        if not isinstance(example_ids, list):
+        # New format: features (feach-like) → build variable_descriptions
+        features = payload.get("features")
+        if isinstance(features, dict):
+            var_descriptions = variable_descriptions_from_features(template, features)
+            ref_id = None
+            feach_data = None
             example_ids = []
-        example_ids = [str(x) for x in example_ids][:3]
+        else:
+            # Legacy: variable_descriptions in payload (we ignore ref/feach/examples from file)
+            var_descriptions = ensure_dict(payload.get("variable_descriptions") or {})
+            ref_id = None
+            feach_data = None
+            example_ids = []
         existing = await repo.get_prompt_by_title(title)
         try:
             if existing:
-                await repo.update_prompt(existing["id"], title, template, var_descriptions, ref_id)
-                await repo.set_prompt_active(existing["id"], is_active)
-                if feach_data is not None:
-                    await repo.update_prompt_feach_data(existing["id"], feach_data)
-                await repo.set_prompt_examples(existing["id"], example_ids)
+                # Keep existing reference when updating (import does not touch ref/feach/examples)
+                keep_ref = existing.get("reference_photo_file_id") if ref_id is None else ref_id
+                await repo.update_prompt(existing["id"], title, template, var_descriptions, keep_ref)
                 await message.answer(f"Prompt «{title}» updated.")
             else:
-                await repo.insert_prompt(title, template, var_descriptions, ref_id, user["tg_id"], is_active=is_active, feach_data=feach_data)
+                await repo.insert_prompt(
+                    title, template, var_descriptions, ref_id, user["tg_id"],
+                    is_active=True, feach_data=feach_data,
+                )
                 new_prompt = await repo.get_prompt_by_title(title)
-                if new_prompt and example_ids:
+                if new_prompt:
                     await repo.set_prompt_examples(new_prompt["id"], example_ids)
                 await message.answer(f"Prompt «{title}» created.")
         except Exception as e:
