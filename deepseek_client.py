@@ -44,26 +44,33 @@ Structure (strict):
 Return only this JSON, nothing else."""
 
 
-FINAL_PROMPT_SYSTEM = """You are an assistant that generates a final image-generation prompt template from an idea and a list of variables.
+FINAL_PROMPT_SYSTEM = """You are an assistant that generates a detailed, multi-paragraph image-generation prompt template from an idea and a list of variables.
 
 RULES:
 - Reply ONLY with valid JSON. No markdown, no code fence.
 - JSON has two keys: "template" and "variable_descriptions".
 
-1) "template" (string): A single prompt sentence in English that will be sent to an image model. Use placeholders:
-   - For IMAGE variables (user uploads a photo): use [VARNAME] e.g. [USER_PHOTO]
-   - For TEXT variables (user picks or types): use <VARNAME> e.g. <STYLE>
-   One variable can be the number of people to take from the user's photo (e.g. <NUM_PEOPLE> or <PEOPLE_FROM_PHOTO>). Mention it in the template like "using <NUM_PEOPLE> person(s) from the user photo".
-   Integrate the idea and all variables naturally. Do not explain, only output the template string.
+1) "template" (string): A LONG, STRUCTURED prompt in English (several paragraphs) that will be sent to an image model.
+   - Use placeholders: [VARNAME] for image (e.g. [USER_PHOTO]), <VARNAME> for text (e.g. <STYLE>).
+   - Whenever the user's reference photo or the person from that photo is mentioned, use exactly [USER_PHOTO] in square brackets (e.g. "the person from [USER_PHOTO]", "Use [USER_PHOTO] as the appearance of the real person", "standing next to [USER_PHOTO]").
+   - Structure the template with clear sections on separate lines, for example:
+     • Opening line: "Use the attached reference photo [USER_PHOTO] as the appearance of the real person." or similar.
+     • Scene: (short scene description, use <STYLE> and other text variables where relevant)
+     • Characters: (who appears, how they interact; mention [USER_PHOTO] when referring to the person from the photo)
+     • Style: (visual style, e.g. cartoon vs realistic; use variables like <STYLE>)
+     • Environment: (setting, location, background)
+     • Composition: (framing, group shot, etc.)
+     • Lighting and integration: (how the person from [USER_PHOTO] blends into the scene)
+     • Mood: (atmosphere, tone)
+     • Quality: (resolution, colors, etc.)
+   - Each section can be 1–3 sentences. Total template length: at least 150 words. Use newlines between sections.
+   - Include [USER_PHOTO] multiple times where it makes sense (e.g. in Scene, Characters, Style, Lighting). Do not explain; output only the template string.
 
 2) "variable_descriptions" (object): Keys are the placeholder strings exactly as in the template ([VARNAME] or <VARNAME>). Each value is an object:
-   - "description": short user-facing text (what to choose or enter)
-   - "options": array of strings (possible choices; empty [] if free text only)
-   - "allow_custom": boolean (true if user can enter their own value)
+   - "description": short user-facing text
+   - "options": array of strings (empty [] if free text only)
+   - "allow_custom": boolean
    - "type": "text" or "image"
-
-Example shape:
-{"template": "Photorealistic <STYLE> scene: [USER_PHOTO] with <NUM_PEOPLE> person(s).", "variable_descriptions": {"<STYLE>": {"description": "Visual style", "options": ["documentary", "anime"], "allow_custom": true, "type": "text"}, "[USER_PHOTO]": {"description": "Your photo", "options": [], "allow_custom": false, "type": "image"}, "<NUM_PEOPLE>": {"description": "How many people from your photo", "options": ["1", "2", "3"], "allow_custom": false, "type": "text"}}}
 
 Return only this JSON."""
 

@@ -409,6 +409,13 @@ class Repo:
         async with self.pool.acquire() as conn:
             return await conn.fetchrow("SELECT * FROM users WHERE tg_id = $1", tg_id)
 
+    async def get_user_by_username(self, username: str) -> Optional[asyncpg.Record]:
+        name = (username or "").strip().lstrip("@")
+        if not name:
+            return None
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("SELECT * FROM users WHERE username = $1", name)
+
     async def set_user_authorized(self, tg_id: int, value: bool) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
@@ -1348,6 +1355,43 @@ def create_router(
             await message.answer("Admin only.")
             return
         await message.answer("Admin panel:", reply_markup=build_admin_menu())
+
+    @router.message(Command("addme"))
+    async def addme_handler(message: Message) -> None:
+        user = await ensure_user(message)
+        if not user or not user["is_admin"]:
+            await message.answer("Admin only.")
+            return
+        payload = (message.text or "").strip().split(maxsplit=2)
+        if len(payload) < 3:
+            await message.answer(
+                "Usage: /addme <user_id_or_@username> <amount>\n"
+                "Example: /addme 184374602 10 or /addme @username -5"
+            )
+            return
+        target_str = payload[1].strip()
+        amount_str = payload[2].strip()
+        try:
+            amount = int(amount_str)
+        except ValueError:
+            await message.answer("Amount must be an integer (can be negative).")
+            return
+        if target_str.startswith("@"):
+            target_user = await repo.get_user_by_username(target_str)
+        else:
+            try:
+                tg_id = int(target_str)
+                target_user = await repo.get_user(tg_id)
+            except ValueError:
+                target_user = await repo.get_user_by_username(target_str)
+        if not target_user:
+            await message.answer("User not found.")
+            return
+        tg_id = int(target_user["tg_id"])
+        new_balance = await repo.add_user_balance(tg_id, amount)
+        await message.answer(
+            f"Balance updated: {target_user.get('username') or tg_id} now has {new_balance} tokens (delta: {amount:+d})."
+        )
 
     @router.message(StateFilter(None), F.text.casefold() == "admin")
     async def admin_text_handler(message: Message) -> None:
