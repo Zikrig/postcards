@@ -634,8 +634,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         import logging
         _log = logging.getLogger(__name__)
         # Тестовая генерация всегда с фото: images/homie.jpg как data URL (API не может скачать URL Telegram)
-        _script_dir = os.path.dirname(os.path.abspath(__file__))
-        _test_photo_path = os.path.join(_script_dir, "images", "homie.jpg")
+        _project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _test_photo_path = os.path.join(_project_root, "images", "homie.jpg")
         _exists = os.path.isfile(_test_photo_path)
         _log.debug("homie.jpg path: %s (exists=%s)", _test_photo_path, _exists)
         print(f"[DEBUG] homie.jpg path={_test_photo_path!r}, exists={_exists}")
@@ -651,8 +651,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 _log.exception("homie.jpg read/encode failed: %s", _e)
                 print(f"[DEBUG] homie.jpg FAIL: {_e!r}")
         else:
-            _log.warning("homie.jpg not found at %s (script dir: %s)", _test_photo_path, _script_dir)
-            print(f"[DEBUG] homie.jpg NOT FOUND (script_dir={_script_dir!r})")
+            _log.warning("homie.jpg not found at %s (project root: %s)", _test_photo_path, _project_root)
+            print(f"[DEBUG] homie.jpg NOT FOUND (project_root={_project_root!r})")
         if not image_urls and prompt.get("reference_photo_file_id"):
             try:
                 ref_id = prompt["reference_photo_file_id"]
