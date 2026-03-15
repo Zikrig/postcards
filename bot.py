@@ -1145,6 +1145,32 @@ def create_router(
         options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
         allow_custom = bool(config.get("allow_custom", True))
 
+        # Auto-handle trivial/disabled text variables
+        if var_type == "text":
+            # If exactly one option and custom input is disabled, just use this value and skip asking user
+            if len(options) == 1 and not allow_custom:
+                answers: dict[str, str] = data.get("answers", {})
+                answers[var_name] = options[0]
+                await state.update_data(
+                    answers=answers,
+                    current_idx=current_idx + 1,
+                    awaiting_custom_for=None,
+                )
+                await ask_next_variable(message, state)
+                return
+
+            # If no options and custom input is disabled, drop this variable from template and skip it
+            if not options and not allow_custom:
+                template = str(data.get("template") or "")
+                template = template.replace(token, "")
+                await state.update_data(
+                    template=template,
+                    current_idx=current_idx + 1,
+                    awaiting_custom_for=None,
+                )
+                await ask_next_variable(message, state)
+                return
+
         if description:
             await message.answer(description)
         elif var_type == "image":
@@ -1821,10 +1847,32 @@ def create_router(
                 elif isinstance(c, str):
                     enabled_opts.append(c)
             my_own = feat.get("my_own", True)
-            if len(enabled_opts) <= 1 and not my_own and not custom:
-                variables_spec.append({"name": varname, "type": "text", "constant": (enabled_opts[0] if enabled_opts else ""), "options": None, "allow_custom": False, "about": feat.get("about", "")})
+            # If no enabled options and no custom values allowed, completely drop this variable
+            if not enabled_opts and not my_own and not custom:
+                continue
+            # If exactly one enabled option and no custom, treat it as constant (no placeholder)
+            if len(enabled_opts) == 1 and not my_own and not custom:
+                variables_spec.append(
+                    {
+                        "name": varname,
+                        "type": "text",
+                        "constant": enabled_opts[0],
+                        "options": None,
+                        "allow_custom": False,
+                        "about": feat.get("about", ""),
+                    }
+                )
             else:
-                variables_spec.append({"name": varname, "type": "text", "constant": None, "options": enabled_opts, "allow_custom": my_own, "about": feat.get("about", "")})
+                variables_spec.append(
+                    {
+                        "name": varname,
+                        "type": "text",
+                        "constant": None,
+                        "options": enabled_opts,
+                        "allow_custom": my_own,
+                        "about": feat.get("about", ""),
+                    }
+                )
         try:
             await callback.message.answer("Generating final prompt…")
             result = await deepseek.generate_final_prompt(idea, variables_spec)
