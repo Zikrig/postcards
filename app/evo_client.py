@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 import aiohttp
 
-from config import Settings
+from .config import Settings
 
 
 class EvoClient:

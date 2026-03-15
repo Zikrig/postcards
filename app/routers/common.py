@@ -1,0 +1,432 @@
+"""Shared context and helpers for routers (ensure_user, run_generation, etc.)."""
+import logging
+from typing import Any, Optional
+
+import asyncpg
+from aiogram import Bot
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.context import FSMContext
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+
+from app.config import Settings
+from app.evo_client import EvoClient
+from app.keyboards import (
+    build_main_menu,
+    build_prompt_edit_menu,
+    build_prompt_edit_variable_actions_menu,
+    build_prompt_edit_variables_menu,
+)
+from app.repo import Repo
+from app.states import AdminStates
+from app.utils import ensure_dict, render_prompt, variable_token
+
+
+BALANCE_BUCKET_KEY = "last_user_remaining_bucket_20"
+
+
+class RouterCtx:
+    def __init__(
+        self,
+        repo: Repo,
+        settings: Settings,
+        evo: EvoClient,
+        bot: Bot,
+        deepseek: Optional[Any] = None,
+    ) -> None:
+        self.repo = repo
+        self.settings = settings
+        self.evo = evo
+        self.bot = bot
+        self.deepseek = deepseek
+
+    async def ensure_user_from_tg(self, tg_user: Any) -> asyncpg.Record:
+        assert tg_user is not None
+        full_name = (tg_user.full_name or "").strip()
+        return await self.repo.upsert_user(
+            tg_id=tg_user.id,
+            username=tg_user.username or "",
+            full_name=full_name,
+            is_admin=tg_user.id in self.settings.admin_ids,
+        )
+
+    async def ensure_user(self, message: Message) -> asyncpg.Record:
+        return await self.ensure_user_from_tg(message.from_user)
+
+    def extract_start_payload(self, message_text: str) -> str:
+        parts = (message_text or "").split(maxsplit=1)
+        if len(parts) < 2:
+            return ""
+        return parts[1].strip()
+
+    async def show_prompt_buttons(self, message: Message) -> None:
+        prompts = await self.repo.list_prompts(active_only=True)
+        if not prompts:
+            await message.answer("No prompts yet. Please wait for admin to add them.")
+            return
+        await message.answer("Select a prompt:", reply_markup=build_main_menu(prompts))
+
+    def get_variable_config(
+        self,
+        raw_configs: Any,
+        token: str,
+        var_type: str,
+    ) -> dict[str, Any]:
+        configs = ensure_dict(raw_configs)
+        raw = configs.get(token)
+        if isinstance(raw, str):
+            return {
+                "description": raw,
+                "options": [],
+                "allow_custom": True,
+                "type": var_type,
+            }
+        if isinstance(raw, dict):
+            return {
+                "description": str(raw.get("description") or ""),
+                "options": [str(x) for x in (raw.get("options") or []) if str(x).strip()],
+                "allow_custom": bool(raw.get("allow_custom", True)),
+                "type": str(raw.get("type") or var_type),
+            }
+        return {
+            "description": "",
+            "options": [],
+            "allow_custom": True,
+            "type": var_type,
+        }
+
+    def normalize_variable_descriptions_for_template(
+        self,
+        raw_descriptions: Any,
+        variables: list[dict[str, str]],
+    ) -> dict[str, Any]:
+        existing = ensure_dict(raw_descriptions)
+        normalized: dict[str, Any] = {}
+        for var in variables:
+            token = variable_token(var)
+            cfg = self.get_variable_config(existing, token, var["type"])
+            cfg["type"] = var["type"]
+            if var["type"] != "text":
+                cfg["options"] = []
+                cfg["allow_custom"] = True
+            normalized[token] = cfg
+        return normalized
+
+    async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record) -> None:
+        reference_text = "set" if prompt["reference_photo_file_id"] else "not set"
+        await message.answer(
+            "Prompt edit menu:\n"
+            f"Title: {prompt['title']}\n"
+            f"Reference image: {reference_text}\n"
+            "Choose what to change:",
+            reply_markup=build_prompt_edit_menu(int(prompt["id"])),
+        )
+
+    async def persist_prompt_edit_state(self, state: FSMContext) -> Optional[asyncpg.Record]:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            return None
+        await self.repo.update_prompt(
+            prompt_id=int(prompt_id),
+            title=data["prompt_title"],
+            template=data["prompt_template"],
+            variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
+            reference_photo_file_id=data.get("reference_photo_file_id"),
+        )
+        return await self.repo.get_prompt_by_id(int(prompt_id))
+
+    async def show_variable_pick_menu(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if prompt_id is None:
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            return
+        if not variables:
+            await message.answer("Template has no variables to edit.")
+            prompt = await self.repo.get_prompt_by_id(int(prompt_id))
+            if prompt:
+                await self.show_prompt_edit_actions(message, prompt)
+            return
+        await message.answer(
+            "Choose variable to edit:",
+            reply_markup=build_prompt_edit_variables_menu(int(prompt_id), variables),
+        )
+
+    async def show_variable_actions_menu(self, message: Message, state: FSMContext, var_idx: int) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        if prompt_id is None or var_idx < 0 or var_idx >= len(variables):
+            await message.answer("Variable not found. Open variable list again.")
+            return
+        var = variables[var_idx]
+        token = variable_token(var)
+        descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        cfg = self.get_variable_config(descriptions, token, var["type"])
+        options = [str(x) for x in (cfg.get("options") or []) if str(x).strip()]
+        allow_custom = bool(cfg.get("allow_custom", True))
+        await state.update_data(edit_var_idx=var_idx)
+        details = (
+            f"Variable: {token}\n"
+            f"Type: {var['type']}\n"
+            f"Description: {str(cfg.get('description') or '') or '(empty)'}\n"
+        )
+        if var["type"] == "text":
+            details += f"Options: {', '.join(options) if options else '(none)'}\nMy own: {'ON' if allow_custom else 'OFF'}"
+        await message.answer(
+            details,
+            reply_markup=build_prompt_edit_variable_actions_menu(int(prompt_id), var_idx, var),
+        )
+
+    def build_text_options_keyboard(self, options: list[str], allow_custom: bool) -> InlineKeyboardMarkup:
+        keyboard = [
+            [InlineKeyboardButton(text=(opt[:20] if len(opt) > 20 else opt), callback_data=f"gen:opt:{idx}")]
+            for idx, opt in enumerate(options)
+        ]
+        if allow_custom:
+            keyboard.append([InlineKeyboardButton(text="My own", callback_data="gen:myown")])
+        return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+    async def ask_admin_text_options(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            await self.ask_admin_next_var_description(message, state)
+            return
+        var = variables[idx]
+        if var["type"] != "text":
+            await state.update_data(var_desc_idx=idx + 1)
+            await self.ask_admin_next_var_description(message, state)
+            return
+        token = variable_token(var)
+        await state.set_state(AdminStates.waiting_text_options)
+        await message.answer(
+            f"Set answer options for {token}.\n"
+            "Send options separated by ';' (example: Mars; Venus; Jupiter), or /skip for no options."
+        )
+
+    async def ask_admin_allow_custom(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        var = variables[idx]
+        token = variable_token(var)
+        await state.set_state(AdminStates.waiting_text_allow_custom)
+        await message.answer(
+            f"Allow 'My own' custom text for {token}?",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="Yes", callback_data="admin:allow_custom:yes"),
+                        InlineKeyboardButton(text="No", callback_data="admin:allow_custom:no"),
+                    ]
+                ]
+            ),
+        )
+
+    async def ask_admin_next_var_description(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("prompt_variables", [])
+        idx: int = data.get("var_desc_idx", 0)
+        if idx >= len(variables):
+            admin_mode = data.get("admin_mode", "create")
+            if admin_mode == "edit_variables" and data.get("editing_prompt_id") is not None:
+                await self.repo.update_prompt(
+                    prompt_id=int(data["editing_prompt_id"]),
+                    title=data["prompt_title"],
+                    template=data["prompt_template"],
+                    variable_descriptions=ensure_dict(data.get("variable_descriptions", {})),
+                    reference_photo_file_id=data.get("reference_photo_file_id"),
+                )
+                prompt = await self.repo.get_prompt_by_id(int(data["editing_prompt_id"]))
+                await state.clear()
+                await message.answer("Variable descriptions updated.")
+                if prompt:
+                    await self.show_prompt_edit_actions(message, prompt)
+            else:
+                await state.set_state(AdminStates.waiting_prompt_reference)
+                await message.answer(
+                    "Send optional reference image now, or type /skip to continue without it."
+                )
+            return
+        var = variables[idx]
+        token = variable_token(var)
+        await message.answer(
+            f"Write a user-facing description for {token}.\n"
+            "User will see only this text.\n"
+            "Type /skip to leave description empty."
+        )
+
+    async def ask_next_variable(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        variables: list[dict[str, str]] = data.get("variables", [])
+        current_idx: int = data.get("current_idx", 0)
+        if current_idx >= len(variables):
+            await self.run_generation(message, state)
+            return
+        variable = variables[current_idx]
+        var_name = variable["name"]
+        var_type = variable["type"]
+        token = variable_token(variable)
+        variable_descriptions = ensure_dict(data.get("variable_descriptions", {}))
+        config = self.get_variable_config(variable_descriptions, token, var_type)
+        description = str(config.get("description") or "").strip()
+        options: list[str] = [str(x) for x in (config.get("options") or []) if str(x).strip()]
+        allow_custom = bool(config.get("allow_custom", True))
+        if var_type == "text":
+            if len(options) == 1 and not allow_custom:
+                answers: dict[str, str] = data.get("answers", {})
+                answers[var_name] = options[0]
+                await state.update_data(
+                    answers=answers,
+                    current_idx=current_idx + 1,
+                    awaiting_custom_for=None,
+                )
+                await self.ask_next_variable(message, state)
+                return
+            if not options and not allow_custom:
+                template = str(data.get("template") or "")
+                template = template.replace(token, "")
+                await state.update_data(
+                    template=template,
+                    current_idx=current_idx + 1,
+                    awaiting_custom_for=None,
+                )
+                await self.ask_next_variable(message, state)
+                return
+        if description:
+            await message.answer(description)
+        elif var_type == "image":
+            await message.answer("Please send a photo.")
+        else:
+            await message.answer("Please send text.")
+        if var_type == "text" and options:
+            await message.answer(
+                "Choose one option:",
+                reply_markup=self.build_text_options_keyboard(options, allow_custom),
+            )
+
+    async def run_generation(self, message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        user_tg_id = int(
+            data.get("request_user_id")
+            or ((message.from_user.id if message.from_user else 0))
+        )
+        if not user_tg_id:
+            await message.answer("Cannot detect user account for billing.")
+            return
+        new_balance = await self.repo.consume_generation_token(user_tg_id)
+        if new_balance is None:
+            balance = await self.repo.get_user_balance(user_tg_id)
+            await message.answer(
+                "Not enough balance for generation.\n"
+                f"Your balance: {balance}\n"
+                "Apply a promo code via your start link."
+            )
+            await state.clear()
+            await self.show_prompt_buttons(message)
+            return
+        template = data["template"]
+        answers: dict[str, str] = data.get("answers", {})
+        image_urls: list[str] = data.get("image_urls", [])
+        prompt_title = data["prompt_title"]
+        final_prompt = render_prompt(template, answers)
+        progress_message = await message.answer(
+            f"Generating image for prompt: {prompt_title}\nStatus: queued"
+        )
+        last_progress_text = progress_message.text or ""
+        try:
+            task_id = await self.evo.create_task(final_prompt, image_urls=image_urls)
+
+            async def update_progress(status: Any, progress: Any) -> None:
+                nonlocal last_progress_text
+                status_text = str(status or "processing")
+                progress_text = "?" if progress is None else str(progress)
+                text = (
+                    f"Generating image for prompt: {prompt_title}\n"
+                    f"Status: {status_text}\n"
+                    f"Progress: {progress_text}%"
+                )
+                if text == last_progress_text:
+                    return
+                try:
+                    await progress_message.edit_text(text)
+                    last_progress_text = text
+                except TelegramBadRequest:
+                    pass
+
+            details = await self.evo.wait_for_completion(task_id, on_progress=update_progress)
+            status = details.get("status")
+            if status != "completed":
+                await progress_message.delete()
+                error = (details.get("error") or {}) if isinstance(details, dict) else {}
+                error_code = error.get("code")
+                error_message = (error.get("message") or "").strip()
+                user_friendly = "Image generation failed."
+                if error_message:
+                    user_friendly = f"{user_friendly}\nReason: {error_message}"
+                if error_code == "content_policy_violation":
+                    user_friendly += (
+                        "\n\nIt looks like the request may include brand logos, "
+                        "trademarks, or copyrighted characters. "
+                        "Please remove logos, brand names, and protected characters, "
+                        "then try again."
+                    )
+                await message.answer(user_friendly)
+                return
+            results = details.get("results") or []
+            if not results:
+                await progress_message.delete()
+                await message.answer("Generation completed, but no images were returned.")
+                return
+            await progress_message.delete()
+            for url in results:
+                await message.answer_photo(photo=url)
+            await message.answer(f"Your balance: {new_balance}")
+            await self.maybe_notify_admins_balance_checkpoint(data)
+        except Exception as e:
+            try:
+                await progress_message.delete()
+            except Exception:
+                pass
+            await message.answer(f"Error: {e}")
+        finally:
+            await state.clear()
+            await self.show_prompt_buttons(message)
+
+    async def maybe_notify_admins_balance_checkpoint(self, state_data: dict[str, Any]) -> None:
+        credits = await self.evo.get_credits()
+        user_data = (credits.get("data") or {}).get("user") or {}
+        remaining_raw = user_data.get("remaining_credits")
+        if remaining_raw is None:
+            return
+        try:
+            remaining = float(remaining_raw)
+        except (TypeError, ValueError):
+            return
+        current_bucket = int(remaining // 20)
+        prev_bucket_raw = await self.repo.get_state_value(BALANCE_BUCKET_KEY)
+        if prev_bucket_raw is None:
+            await self.repo.set_state_value(BALANCE_BUCKET_KEY, str(current_bucket))
+            return
+        try:
+            prev_bucket = int(prev_bucket_raw)
+        except ValueError:
+            prev_bucket = current_bucket
+        if current_bucket < prev_bucket:
+            admin_text = (
+                "Balance checkpoint reached.\n"
+                f"User remaining credits: {remaining}\n"
+            )
+            for admin_id in self.settings.admin_ids:
+                try:
+                    await self.bot.send_message(admin_id, admin_text)
+                except Exception:
+                    logging.exception("Failed to send admin balance notification to %s", admin_id)
+        await self.repo.set_state_value(BALANCE_BUCKET_KEY, str(current_bucket))
+
+    async def telegram_file_url(self, file_id: str) -> str:
+        file = await self.bot.get_file(file_id)
+        return f"https://api.telegram.org/file/bot{self.settings.bot_token}/{file.file_path}"

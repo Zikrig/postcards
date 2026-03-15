@@ -1,7 +1,7 @@
 """Prompt export and variable_descriptions from features."""
 from typing import Any
 
-from utils import (
+from .utils import (
     ensure_dict,
     ensure_unique_option_key,
     extract_variables,

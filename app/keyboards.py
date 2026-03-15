@@ -4,7 +4,7 @@ from typing import Any
 import asyncpg
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from utils import btn_label, get_feach_option_enabled, variable_token
+from .utils import btn_label, get_feach_option_enabled, variable_token
 
 
 def build_main_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:

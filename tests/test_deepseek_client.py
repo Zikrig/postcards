@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from deepseek_client import (
+from app.deepseek_client import (
     DeepSeekClient,
     _ensure_feach_shape,
     _extract_json_from_content,
