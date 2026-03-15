@@ -732,9 +732,10 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     """Menu for a draft prompt: idea + feature buttons, Generate final, Activate, Export, Back."""
     features = feach_data.get("features") or {}
     rows = []
-    for feat_key in features:
+    for feat_key, feat in features.items():
+        label = str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key)
         rows.append([
-            InlineKeyboardButton(text=feat_key, callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+            InlineKeyboardButton(text=label, callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
         ])
     rows.append([
         InlineKeyboardButton(text="Generate final prompt", callback_data=f"admin:final:{prompt_id}"),
@@ -1412,7 +1413,7 @@ def create_router(
             return
         await state.update_data(gen_title=title)
         await state.set_state(AdminStates.waiting_gen_idea)
-        await message.answer("Enter the main idea for the image (this will be sent to DeepSeek):")
+        await message.answer("Enter the main idea for the image:")
 
     @router.message(AdminStates.waiting_gen_idea)
     async def admin_gen_idea(message: Message, state: FSMContext) -> None:
