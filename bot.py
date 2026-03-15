@@ -1545,10 +1545,17 @@ def create_router(
         prompt = await repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
-            await callback.message.answer(
-                "Updated.",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
-            )
+            try:
+                await callback.message.edit_reply_markup(
+                    reply_markup=build_feature_config_menu(
+                        prompt_id,
+                        feat_key,
+                        feach_data.get("features", {}).get(feat_key, {}),
+                    )
+                )
+            except TelegramBadRequest:
+                # Ignore harmless edit errors (e.g. message was changed elsewhere).
+                pass
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:myown:"))
@@ -1584,10 +1591,16 @@ def create_router(
         prompt = await repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
-            await callback.message.answer(
-                "My own: " + ("ON" if feat["my_own"] else "OFF"),
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
-            )
+            try:
+                await callback.message.edit_reply_markup(
+                    reply_markup=build_feature_config_menu(
+                        prompt_id,
+                        feat_key,
+                        feach_data.get("features", {}).get(feat_key, {}),
+                    )
+                )
+            except TelegramBadRequest:
+                pass
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:featadd:"))
