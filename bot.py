@@ -229,6 +229,12 @@ def make_option_key(text: str, max_length: int = 20) -> str:
     return s[:max_length].rstrip("_")
 
 
+def btn_label(text: str, max_length: int = 20) -> str:
+    """Подпись кнопки не длиннее max_length символов."""
+    s = (text or "").strip()
+    return s[:max_length] if len(s) > max_length else s
+
+
 def ensure_unique_option_key(base_key: str, existing: set[str], max_length: int = 20) -> str:
     """Уникальный ключ: base_key или base_key_2, base_key_3, ... (укладываемся в max_length)."""
     key = (base_key or "opt")[:max_length]
@@ -829,7 +835,7 @@ class Repo:
 
 def build_main_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text=p["title"], callback_data=f"prompt:select:{p['id']}")]
+        [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
         for p in prompts
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -860,7 +866,7 @@ def build_prompt_list_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarku
     rows = []
     for p in prompts:
         active = p.get("is_active", True)
-        label = f"{'🟢' if active else '🔴'} {p['title']}"
+        label = btn_label(f"{'🟢' if active else '🔴'} {p['title']}", 20)
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:pw:item:{p['id']}")])
     rows.append([InlineKeyboardButton(text="Back", callback_data="admin:prompt_work")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -885,12 +891,12 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     features = feach_data.get("features") or {}
     rows = []
     for feat_key, feat in features.items():
-        label = str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key)
+        label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
         rows.append([
             InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
         ])
     rows.append([
-        InlineKeyboardButton(text="Generate final prompt", callback_data=f"admin:final:{prompt_id}"),
+        InlineKeyboardButton(text="Generate final", callback_data=f"admin:final:{prompt_id}"),
     ])
     rows.append([
         InlineKeyboardButton(
@@ -910,12 +916,12 @@ def build_feature_config_menu(
     feat_key: str,
     feature: dict[str, Any],
 ) -> InlineKeyboardMarkup:
-    """Option rows (text + green/red), My own, Add, Done. Option view = show full text on click."""
+    """Option rows (text + green/red + Del), My own, Add, Done. Option view = show full text on click."""
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
     rows = []
     for opt_key, opt_val in opts.items():
-        text_short = (get_feach_option_text(opt_val) or "")[:20] or opt_key
+        text_short = btn_label(get_feach_option_text(opt_val) or opt_key, 20)
         enabled = get_feach_option_enabled(opt_val)
         rows.append([
             InlineKeyboardButton(text=text_short, callback_data=f"admin:optview:{prompt_id}:{feat_key}:{opt_key}"),
@@ -923,10 +929,11 @@ def build_feature_config_menu(
                 text="🟢" if enabled else "🔴",
                 callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
             ),
+            InlineKeyboardButton(text="Del", callback_data=f"admin:optdel:{prompt_id}:{feat_key}:{opt_key}"),
         ])
     for i, c in enumerate(custom):
         opt_key = f"custom_{i}"
-        text_short = (c.get("text", str(c)) if isinstance(c, dict) else str(c))[:20]
+        text_short = btn_label(c.get("text", str(c)) if isinstance(c, dict) else str(c), 20)
         enabled = c.get("enabled", True) if isinstance(c, dict) else True
         rows.append([
             InlineKeyboardButton(text=text_short, callback_data=f"admin:optview:{prompt_id}:{feat_key}:{opt_key}"),
@@ -934,10 +941,11 @@ def build_feature_config_menu(
                 text="🟢" if enabled else "🔴",
                 callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
             ),
+            InlineKeyboardButton(text="Del", callback_data=f"admin:optdel:{prompt_id}:{feat_key}:{opt_key}"),
         ])
     my_own = feature.get("my_own", True)
     rows.append([
-        InlineKeyboardButton(text="My own (user types)", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
+        InlineKeyboardButton(text=btn_label("My own (user types)", 20), callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
         InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
@@ -951,10 +959,10 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
-            [InlineKeyboardButton(text="Edit variable descriptions", callback_data=f"admin:editpart:variables:{prompt_id}")],
-            [InlineKeyboardButton(text="Replace reference image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
-            [InlineKeyboardButton(text="Remove reference image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
-            [InlineKeyboardButton(text="Set examples (1–3 images)", callback_data=f"admin:editpart:examples:{prompt_id}")],
+            [InlineKeyboardButton(text="Edit variables", callback_data=f"admin:editpart:variables:{prompt_id}")],
+            [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
+            [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
+            [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
             [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
         ]
     )
@@ -965,7 +973,7 @@ def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, s
     for idx, var in enumerate(variables):
         token = variable_token(var)
         rows.append(
-            [InlineKeyboardButton(text=token, callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
+            [InlineKeyboardButton(text=btn_label(token, 20), callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
         )
     rows.append([InlineKeyboardButton(text="Back to prompt edit", callback_data=f"admin:edit:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -997,8 +1005,8 @@ def build_prompt_edit_variable_actions_menu(
 def build_promo_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Create single-user promo", callback_data="admin:promo:create:single")],
-            [InlineKeyboardButton(text="Create multi-user promo", callback_data="admin:promo:create:multi")],
+            [InlineKeyboardButton(text="Single-user promo", callback_data="admin:promo:create:single")],
+            [InlineKeyboardButton(text="Multi-user promo", callback_data="admin:promo:create:multi")],
             [InlineKeyboardButton(text="Back", callback_data="admin:promo:back")],
         ]
     )
@@ -1006,7 +1014,7 @@ def build_promo_menu() -> InlineKeyboardMarkup:
 
 def build_promo_list_menu(promos: list[asyncpg.Record]) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text=p["code"], callback_data=f"admin:promo:item:{p['id']}")]
+        [InlineKeyboardButton(text=btn_label(str(p["code"]), 20), callback_data=f"admin:promo:item:{p['id']}")]
         for p in promos
     ]
     rows.extend(build_promo_menu().inline_keyboard)
@@ -1780,6 +1788,72 @@ def create_router(
                 # Ignore harmless edit errors (e.g. message was changed elsewhere).
                 pass
         await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:optdel:"))
+    async def admin_opt_delete(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        opt_key = parts[4]
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        if opt_key.startswith("custom_"):
+            custom = list(feat.get("custom") or [])
+            idx = int(opt_key.replace("custom_", "")) if opt_key.replace("custom_", "").isdigit() else -1
+            if 0 <= idx < len(custom):
+                custom.pop(idx)
+                feat["custom"] = custom
+            else:
+                await callback.answer("Option not found", show_alert=True)
+                return
+        else:
+            opts = feat.get("options") or {}
+            if opt_key not in opts:
+                await callback.answer("Option not found", show_alert=True)
+                return
+            del opts[opt_key]
+            feat["options"] = opts
+        await repo.update_prompt_feach_data(prompt_id, feach_data)
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer()
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        feat = feach_data.get("features", {}).get(feat_key, {})
+        varname = feat.get("varname", feat_key)
+        about = feat.get("about", "")
+        try:
+            await callback.message.edit_text(
+                f"Variable: {varname}\nAbout: {about}",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                f"Variable: {varname}\nAbout: {about}",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+            )
+        await callback.answer("Deleted")
 
     @router.callback_query(F.data.startswith("admin:myown:"))
     async def admin_myown_toggle(callback: CallbackQuery) -> None:
