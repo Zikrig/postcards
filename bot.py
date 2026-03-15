@@ -900,6 +900,7 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     ])
     rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -3043,6 +3044,35 @@ def create_router(
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:delete:"))
+    async def admin_delete_prompt_ask_confirm(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except (TypeError, ValueError):
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        title = prompt.get("title") or "Untitled"
+        await callback.message.answer(
+            f"Delete prompt «{title}»? This cannot be undone.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Yes, delete", callback_data=f"admin:delete_confirm:{prompt_id}"),
+                    InlineKeyboardButton(text="Cancel", callback_data=f"admin:pw:item:{prompt_id}"),
+                ],
+            ]),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:delete_confirm:"))
     async def admin_delete_prompt_confirm(callback: CallbackQuery) -> None:
         if not callback.message:
             return
@@ -3050,20 +3080,17 @@ def create_router(
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-
         try:
-            prompt_id = int(callback.data.split(":")[-1])  # type: ignore[union-attr]
+            prompt_id = int((callback.data or "").split(":")[-1])
         except (TypeError, ValueError):
             await callback.answer("Invalid prompt id", show_alert=True)
             return
-
         async with repo.pool.acquire() as conn:
             row = await conn.fetchrow("SELECT title FROM prompts WHERE id = $1", prompt_id)
             if not row:
                 await callback.answer("Prompt not found", show_alert=True)
                 return
             await conn.execute("DELETE FROM prompts WHERE id = $1", prompt_id)
-
         await callback.message.answer(f"Prompt deleted: {row['title']}")
         await callback.answer("Deleted")
 
