@@ -629,43 +629,12 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             else:
                 answers[var["name"]] = ""
         final_prompt = render_prompt(template, answers)
-        image_urls: list[str] = []
-        import base64
-        import logging
-        _log = logging.getLogger(__name__)
-        # Тестовая генерация всегда с фото: app/images/homie.jpg как data URL (API не может скачать URL Telegram)
-        _app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        _test_photo_path = os.path.join(_app_dir, "images", "homie.jpg")
-        _exists = os.path.isfile(_test_photo_path)
-        _log.debug("homie.jpg path: %s (exists=%s)", _test_photo_path, _exists)
-        print(f"[DEBUG] homie.jpg path={_test_photo_path!r}, exists={_exists}")
-        if _exists:
-            try:
-                with open(_test_photo_path, "rb") as _f:
-                    _raw = _f.read()
-                _b64 = base64.b64encode(_raw).decode("ascii")
-                image_urls.append(f"data:image/jpeg;base64,{_b64}")
-                _log.debug("homie.jpg loaded: %d bytes -> data URL (len=%d)", len(_raw), len(image_urls[0]))
-                print(f"[DEBUG] homie.jpg loaded OK: {len(_raw)} bytes, data URL len={len(image_urls[0])}")
-            except Exception as _e:
-                _log.exception("homie.jpg read/encode failed: %s", _e)
-                print(f"[DEBUG] homie.jpg FAIL: {_e!r}")
-        else:
-            _log.warning("homie.jpg not found at %s (app_dir: %s)", _test_photo_path, _app_dir)
-            print(f"[DEBUG] homie.jpg NOT FOUND (app_dir={_app_dir!r})")
-        if not image_urls and prompt.get("reference_photo_file_id"):
-            try:
-                ref_id = prompt["reference_photo_file_id"]
-                tg_file = await callback.ctx.bot.get_file(ref_id)
-                buf = await callback.ctx.bot.download_file(tg_file.file_path)
-                raw = buf.read() if hasattr(buf, "read") else buf
-                image_urls.append(f"data:image/jpeg;base64,{base64.b64encode(raw).decode('ascii')}")
-                print(f"[DEBUG] reference_photo_file_id used, image_urls=1")
-            except Exception as _e:
-                _log.debug("reference_photo_file_id fallback failed: %s", _e)
-                print(f"[DEBUG] reference_photo_file_id FAIL: {_e!r}")
-        print(f"[DEBUG] admin_test_prompt: image_urls count={len(image_urls)}")
-        _log.debug("admin_test_prompt: image_urls count=%d (0=no ref image)", len(image_urls))
+        # Тестовая генерация: API принимает URL изображения (публичная ссылка)
+        _test_image_url = (
+            "https://static0.srcdn.com/wordpress/wp-content/uploads/2025/11/homelander-poster.jpg"
+            "?q=49&fit=crop&w=1600&h=900&dpr=2"
+        )
+        image_urls: list[str] = [_test_image_url]
         admin_tg_id = callback.from_user.id
         new_balance = await ctx.repo.consume_generation_token(admin_tg_id)
         if new_balance is None:
