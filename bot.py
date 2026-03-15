@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -2151,27 +2152,28 @@ def create_router(
             cfg = get_variable_config(var_desc, token, var["type"])
             opts = [str(x) for x in (cfg.get("options") or []) if str(x).strip()]
             if var["type"] == "text" and opts:
-                answers[var["name"]] = opts[0]
+                answers[var["name"]] = random.choice(opts)
             else:
                 answers[var["name"]] = ""
         final_prompt = render_prompt(template, answers)
         image_urls: list[str] = []
-        # Тестовая генерация всегда с фото: используем images/homie.jpg
+        import base64
+        # Тестовая генерация всегда с фото: images/homie.jpg как data URL (API не может скачать URL Telegram)
         _test_photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "homie.jpg")
         if os.path.isfile(_test_photo_path):
             try:
-                from aiogram.types import BufferedInputFile
                 with open(_test_photo_path, "rb") as _f:
-                    _data = _f.read()
-                _sent = await callback.message.answer_photo(photo=BufferedInputFile(_data, "homie.jpg"))
-                if _sent.photo:
-                    _url = await telegram_file_url(_sent.photo[-1].file_id)
-                    image_urls.append(_url)
+                    _b64 = base64.b64encode(_f.read()).decode("ascii")
+                image_urls.append(f"data:image/jpeg;base64,{_b64}")
             except Exception:
                 pass
         if not image_urls and prompt.get("reference_photo_file_id"):
             try:
-                image_urls.append(await telegram_file_url(prompt["reference_photo_file_id"]))
+                ref_id = prompt["reference_photo_file_id"]
+                tg_file = await callback.bot.get_file(ref_id)
+                buf = await callback.bot.download_file(tg_file.file_path)
+                raw = buf.read() if hasattr(buf, "read") else buf
+                image_urls.append(f"data:image/jpeg;base64,{base64.b64encode(raw).decode('ascii')}")
             except Exception:
                 pass
         admin_tg_id = callback.from_user.id
