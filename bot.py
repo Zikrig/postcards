@@ -917,7 +917,7 @@ def build_feature_config_menu(
     feat_key: str,
     feature: dict[str, Any],
 ) -> InlineKeyboardMarkup:
-    """Option rows (text + green/red), My own, Don't specify, Add option, Del feature, Done, Back."""
+    """Option rows (text + green/red), My own, Add option, Don't specify (remove variable), Done, Back."""
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
     rows = []
@@ -947,13 +947,8 @@ def build_feature_config_menu(
         InlineKeyboardButton(text=btn_label("My own (user types)", 20), callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
         InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
     ])
-    dont_specify = bool(feature.get("dont_specify", False))
-    rows.append([
-        InlineKeyboardButton(text="Don't specify", callback_data=f"admin:dontspecify:{prompt_id}:{feat_key}"),
-        InlineKeyboardButton(text="ON" if dont_specify else "OFF", callback_data=f"admin:dontspecify:{prompt_id}:{feat_key}"),
-    ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
-    rows.append([InlineKeyboardButton(text="Del feature", callback_data=f"admin:featdel:{prompt_id}:{feat_key}")])
+    rows.append([InlineKeyboardButton(text="Don't specify", callback_data=f"admin:featdel:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:pw:item:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -1856,50 +1851,6 @@ def create_router(
                 )
         await callback.answer("Feature deleted")
 
-    @router.callback_query(F.data.startswith("admin:dontspecify:"))
-    async def admin_dont_specify_toggle(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
-        parts = (callback.data or "").split(":")
-        if len(parts) < 4:
-            await callback.answer("Invalid", show_alert=True)
-            return
-        try:
-            prompt_id = int(parts[2])
-        except ValueError:
-            await callback.answer("Invalid", show_alert=True)
-            return
-        feat_key = parts[3]
-        prompt = await repo.get_prompt_by_id(prompt_id)
-        if not prompt:
-            await callback.answer("Prompt not found", show_alert=True)
-            return
-        feach_data = ensure_dict(prompt.get("feach_data") or {})
-        features = feach_data.get("features") or {}
-        if feat_key not in features:
-            await callback.answer("Feature not found", show_alert=True)
-            return
-        feat = features[feat_key]
-        feat["dont_specify"] = not feat.get("dont_specify", False)
-        await repo.update_prompt_feach_data(prompt_id, feach_data)
-        prompt = await repo.get_prompt_by_id(prompt_id)
-        if prompt:
-            feach_data = ensure_dict(prompt.get("feach_data") or {})
-            feat = feach_data.get("features", {}).get(feat_key, {})
-            varname = feat.get("varname", feat_key)
-            about = feat.get("about", "")
-            try:
-                await callback.message.edit_reply_markup(
-                    reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
-                )
-            except TelegramBadRequest:
-                pass
-        await callback.answer("ON" if feat.get("dont_specify") else "OFF")
-
     @router.callback_query(F.data.startswith("admin:myown:"))
     async def admin_myown_toggle(callback: CallbackQuery) -> None:
         if not callback.message:
@@ -2107,8 +2058,6 @@ def create_router(
             }
         ]
         for feat_key, feat in features.items():
-            if feat.get("dont_specify"):
-                continue
             varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
             opts = feat.get("options") or {}
             custom = feat.get("custom") or []
