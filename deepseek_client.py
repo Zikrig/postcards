@@ -12,22 +12,24 @@ from dotenv import load_dotenv
 
 LOAD_FEACH_PROMPT = """You are an assistant that helps turn a short photo idea into a structured brief for image generation.
 
+LANGUAGE: Use English only for all output (idea, about, option texts). Regardless of the user's input language, respond in English.
+
 RULES:
 - Reply ONLY with valid JSON. No markdown, no code fence, no extra text.
 - The JSON must have exactly two top-level keys: "idea" and "features".
 
-1) "idea" (string): Slightly refined and clear one-sentence description of the image idea in the same language as the user input.
+1) "idea" (string): Slightly refined and clear one-sentence description of the image idea, in English.
 
 2) "features" (object): Between 5 and 8 feature keys. One key MUST be "style". The rest can be "feature1", "feature2", "feature3", etc.
 
-   For "style": suggest 3–5 visual styles (e.g. documentary, anime, horror, photorealistic). In "about" briefly explain what this variable controls.
+   For "style": suggest 3–5 visual styles (e.g. documentary, anime, horror, photorealistic). In "about" briefly explain what this variable controls, in English.
 
    Do NOT add a feature for "who is in the photo" or "person/character" with text options (e.g. "I", "my friend"). The person in the scene is always the user's reference photo ([USER_PHOTO]), not a variable choice.
 
    For each other feature: think of concrete variable aspects of the scene (e.g. what the astronaut plants, what is in the sky, background object). Each feature has:
    - "varname": short Latin/keyboard-friendly name for the variable (e.g. FLAG_OBJECT, SKY_CONTENT).
-   - "about": short explanation for the user (in the same language as the idea).
-   - "options": object with keys "option1", "option2", "option3" (and optionally "option4", "option5"). Each value is a short option text.
+   - "about": short explanation for the user, in English.
+   - "options": object with keys "option1", "option2", "option3" (and optionally "option4", "option5"). Each value is a short option text in English.
 
 Structure (strict):
 {
@@ -47,6 +49,8 @@ Return only this JSON, nothing else."""
 
 
 FINAL_PROMPT_SYSTEM = """You are an assistant that generates a detailed, multi-paragraph image-generation prompt template from an idea and a list of variables.
+
+LANGUAGE: Use English only. The template and all variable_descriptions (descriptions, options) must be in English. No other language is allowed.
 
 RULES:
 - Reply ONLY with valid JSON. No markdown, no code fence.
@@ -69,12 +73,12 @@ RULES:
    - Include [USER_PHOTO] multiple times where it makes sense (e.g. in Scene, Characters, Style, Lighting). Do not explain; output only the template string.
 
 2) "variable_descriptions" (object): Keys are the placeholder strings exactly as in the template ([VARNAME] or <VARNAME>). Each value is an object:
-   - "description": short user-facing text
-   - "options": array of strings (empty [] if free text only)
+   - "description": short user-facing text in English
+   - "options": array of strings in English (empty [] if free text only)
    - "allow_custom": boolean
    - "type": "text" or "image"
 
-Return only this JSON."""
+Return only this JSON. All text must be in English."""
 
 
 def _ensure_feach_shape(data: Any) -> dict[str, Any]:
