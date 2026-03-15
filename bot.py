@@ -182,11 +182,18 @@ def normalize_feach_for_storage(api_feach: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(opts, dict):
             opts = {}
         normalized_opts: dict[str, Any] = {}
+        used_opt_keys: set[str] = set()
         for opt_k, opt_v in opts.items():
             if isinstance(opt_v, dict) and "text" in opt_v:
-                normalized_opts[opt_k] = {"text": str(opt_v.get("text", "")), "enabled": bool(opt_v.get("enabled", True))}
+                text = str(opt_v.get("text", ""))
+                enabled = bool(opt_v.get("enabled", True))
             else:
-                normalized_opts[opt_k] = {"text": str(opt_v) if opt_v is not None else "", "enabled": True}
+                text = str(opt_v) if opt_v is not None else ""
+                enabled = True
+            base_key = make_option_key(text, max_length=20)
+            norm_key = ensure_unique_option_key(base_key, used_opt_keys, max_length=20)
+            used_opt_keys.add(norm_key)
+            normalized_opts[norm_key] = {"text": text, "enabled": enabled}
         out_features[key] = {
             "varname": feat.get("varname", key),
             "about": feat.get("about", ""),
@@ -207,6 +214,32 @@ def get_feach_option_enabled(opt_value: Any) -> bool:
     if isinstance(opt_value, dict):
         return bool(opt_value.get("enabled", True))
     return True
+
+
+def make_option_key(text: str, max_length: int = 20) -> str:
+    """Осмысленный ключ опции из текста: только a-z, 0-9, _, не длиннее max_length (для JSON и callback_data)."""
+    s = (text or "").strip().lower()
+    if not s:
+        return "opt"
+    # Только латиница, цифры, пробелы; пробелы -> _
+    s = re.sub(r"[^a-z0-9\s]", "", s)
+    s = re.sub(r"\s+", "_", s).strip("_")
+    if not s:
+        return "opt"
+    return s[:max_length].rstrip("_")
+
+
+def ensure_unique_option_key(base_key: str, existing: set[str], max_length: int = 20) -> str:
+    """Уникальный ключ: base_key или base_key_2, base_key_3, ... (укладываемся в max_length)."""
+    key = (base_key or "opt")[:max_length]
+    if key not in existing:
+        return key
+    for i in range(2, 100):
+        suffix = f"_{i}"
+        candidate = (base_key or "opt")[: max_length - len(suffix)] + suffix
+        if candidate not in existing:
+            return candidate
+    return base_key[:max_length] + "_0"
 
 
 def build_prompt_export_payload(prompt_record: Any) -> dict[str, Any]:
@@ -234,8 +267,12 @@ def build_prompt_export_payload(prompt_record: Any) -> dict[str, Any]:
             config = {"description": "", "options": [], "allow_custom": True}
         key = var["name"].lower().replace(" ", "_")
         options_obj: dict[str, str] = {}
-        for i, opt in enumerate(config["options"]):
-            options_obj[f"opt_{i}"] = opt
+        used_keys: set[str] = set()
+        for opt in config["options"]:
+            base_key = make_option_key(opt, max_length=20)
+            opt_key = ensure_unique_option_key(base_key, used_keys, max_length=20)
+            used_keys.add(opt_key)
+            options_obj[opt_key] = opt
         features[key] = {
             "varname": var["name"],
             "about": config["description"],
@@ -1124,7 +1161,7 @@ def create_router(
 
     def build_text_options_keyboard(options: list[str], allow_custom: bool) -> InlineKeyboardMarkup:
         keyboard = [
-            [InlineKeyboardButton(text=opt, callback_data=f"gen:opt:{idx}")]
+            [InlineKeyboardButton(text=(opt[:20] if len(opt) > 20 else opt), callback_data=f"gen:opt:{idx}")]
             for idx, opt in enumerate(options)
         ]
         if allow_custom:
