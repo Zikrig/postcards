@@ -1650,7 +1650,7 @@ def create_router(
             await state.clear()
             return
         try:
-            await message.answer("Calling DeepSeek…")
+            await message.answer("Calling bot…")
             api_feach = await deepseek.refine_idea(idea)
             normalized = normalize_feach_for_storage(api_feach)
         except Exception as e:
