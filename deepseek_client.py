@@ -22,7 +22,9 @@ RULES:
 
    For "style": suggest 3–5 visual styles (e.g. documentary, anime, horror, photorealistic). In "about" briefly explain what this variable controls.
 
-   For each other feature: think of concrete variable aspects of the scene (e.g. what the astronaut plants, what is in the sky, background object, character detail). Each feature has:
+   Do NOT add a feature for "who is in the photo" or "person/character" with text options (e.g. "I", "my friend"). The person in the scene is always the user's reference photo ([USER_PHOTO]), not a variable choice.
+
+   For each other feature: think of concrete variable aspects of the scene (e.g. what the astronaut plants, what is in the sky, background object). Each feature has:
    - "varname": short Latin/keyboard-friendly name for the variable (e.g. FLAG_OBJECT, SKY_CONTENT).
    - "about": short explanation for the user (in the same language as the idea).
    - "options": object with keys "option1", "option2", "option3" (and optionally "option4", "option5"). Each value is a short option text.

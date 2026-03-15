@@ -253,6 +253,9 @@ def build_prompt_export_payload(prompt_record: Any) -> dict[str, Any]:
     variables = extract_variables(template)
     features: dict[str, Any] = {}
     for var in variables:
+        # Переменные в квадратных скобках [USER_PHOTO] — плейсхолдер для фото, не экспортируем в features
+        if var["type"] == "image":
+            continue
         token = variable_token(var)
         raw = var_desc.get(token)
         if isinstance(raw, str):
@@ -285,16 +288,25 @@ def build_prompt_export_payload(prompt_record: Any) -> dict[str, Any]:
 def variable_descriptions_from_features(template: str, features: dict[str, Any]) -> dict[str, Any]:
     """
     Build variable_descriptions from template placeholders and feach-like features.
-    features: { "time_of_day": { "varname": "TIME_OF_DAY", "about": "...", "options": {...} | [...], "my_own": bool }, ... }
+    [USER_PHOTO] и прочие переменные в [] — всегда тип image (фото), не берём для них данные из features.
+    features только для текстовых переменных <NAME>.
     """
     variables = extract_variables(template)
     var_desc: dict[str, Any] = {}
     for var in variables:
         token = variable_token(var)
+        # Переменные в квадратных скобках — плейсхолдер для приложенного фото, не смешиваем с текстовыми features
+        if var["type"] == "image":
+            var_desc[token] = {
+                "description": "",
+                "options": [],
+                "allow_custom": True,
+                "type": "image",
+            }
+            continue
         key = var["name"].lower().replace(" ", "_")
         feat = (features or {}).get(key)
         if not feat or not isinstance(feat, dict):
-            # try match by varname
             name_upper = var["name"].upper().replace(" ", "_")
             for f in (features or {}).values():
                 if isinstance(f, dict) and (f.get("varname") or "").upper().replace(" ", "_") == name_upper:
@@ -313,14 +325,14 @@ def variable_descriptions_from_features(template: str, features: dict[str, Any])
                 "description": about,
                 "options": opts,
                 "allow_custom": bool(feat.get("my_own", True)),
-                "type": var["type"],
+                "type": "text",
             }
         else:
             var_desc[token] = {
                 "description": "",
                 "options": [],
                 "allow_custom": True,
-                "type": var["type"],
+                "type": "text",
             }
     return var_desc
 
@@ -1948,7 +1960,17 @@ def create_router(
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
         idea = feach_data.get("idea", "")
-        variables_spec: list[dict[str, Any]] = []
+        # Персона в сцене — всегда приложенное фото [USER_PHOTO], не текстовая переменная
+        variables_spec: list[dict[str, Any]] = [
+            {
+                "name": "USER_PHOTO",
+                "type": "image",
+                "constant": None,
+                "options": None,
+                "allow_custom": False,
+                "about": "Reference photo of the person to integrate into the scene",
+            }
+        ]
         for feat_key, feat in features.items():
             varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
             opts = feat.get("options") or {}
@@ -1998,6 +2020,14 @@ def create_router(
             return
         template = result.get("template", "")
         var_descriptions = ensure_dict(result.get("variable_descriptions") or {})
+        # Всегда помечаем [USER_PHOTO] как image, чтобы не смешивать с текстовыми переменными
+        if "[USER_PHOTO]" in template:
+            var_descriptions["[USER_PHOTO]"] = {
+                "description": "Reference photo of the person",
+                "options": [],
+                "allow_custom": True,
+                "type": "image",
+            }
         await repo.update_prompt(prompt_id, prompt["title"], template, var_descriptions, prompt.get("reference_photo_file_id"))
         await callback.message.answer("Final prompt saved. You can activate it or edit further.")
         prompt = await repo.get_prompt_by_id(prompt_id)
