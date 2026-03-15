@@ -1901,18 +1901,33 @@ def create_router(
                 logging.warning("admin_export_prompt: prompt %s not found", prompt_id)
                 await callback.answer("Prompt not found", show_alert=True)
                 return
+            var_desc = prompt.get("variable_descriptions")
+            if hasattr(var_desc, "__iter__") and not isinstance(var_desc, (str, bytes)):
+                var_desc = dict(var_desc) if var_desc else {}
+            else:
+                var_desc = {}
+            feach = prompt.get("feach_data")
+            if feach is not None and hasattr(feach, "copy"):
+                feach = dict(feach)
+            elif feach is not None and not isinstance(feach, dict):
+                feach = None
+            ex_ids = prompt.get("example_file_ids")
+            if isinstance(ex_ids, list):
+                ex_ids = list(ex_ids)
+            else:
+                ex_ids = []
             payload = {
-                "title": prompt["title"],
-                "template": prompt["template"],
-                "variable_descriptions": dict(prompt.get("variable_descriptions") or {}),
+                "title": str(prompt["title"] or ""),
+                "template": str(prompt["template"] or ""),
+                "variable_descriptions": var_desc,
                 "is_active": bool(prompt.get("is_active", True)),
                 "reference_photo_file_id": prompt.get("reference_photo_file_id"),
-                "feach_data": prompt.get("feach_data"),
-                "example_file_ids": prompt.get("example_file_ids") if isinstance(prompt.get("example_file_ids"), list) else [],
+                "feach_data": feach,
+                "example_file_ids": ex_ids,
             }
             logging.info("admin_export_prompt: payload built for prompt_id=%s (title=%r)", prompt_id, payload["title"])
             from io import BytesIO
-            buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+            buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2, default=str).encode("utf-8"))
             buf.seek(0)
             from aiogram.types import BufferedInputFile
             await callback.message.answer_document(
@@ -1920,10 +1935,13 @@ def create_router(
             )
             logging.info("admin_export_prompt: document sent for prompt_id=%s", prompt_id)
             await callback.answer()
-        except Exception:
+        except Exception as e:
             logging.exception("admin_export_prompt: unexpected error")
+            err_msg = str(e).strip() or type(e).__name__
+            if len(err_msg) > 80:
+                err_msg = err_msg[:77] + "..."
             try:
-                await callback.answer("Export failed", show_alert=True)
+                await callback.answer(f"Export failed: {err_msg}", show_alert=True)
             except Exception:
                 pass
 
