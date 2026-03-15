@@ -3,5 +3,4 @@ __pycache__/
 venv/
 generate_image.py
 text.txt
-images/
 server_key

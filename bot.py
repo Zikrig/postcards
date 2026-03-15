@@ -2156,7 +2156,20 @@ def create_router(
                 answers[var["name"]] = ""
         final_prompt = render_prompt(template, answers)
         image_urls: list[str] = []
-        if prompt.get("reference_photo_file_id"):
+        # Тестовая генерация всегда с фото: используем images/homie.jpg
+        _test_photo_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "images", "homie.jpg")
+        if os.path.isfile(_test_photo_path):
+            try:
+                from aiogram.types import BufferedInputFile
+                with open(_test_photo_path, "rb") as _f:
+                    _data = _f.read()
+                _sent = await callback.message.answer_photo(photo=BufferedInputFile(_data, "homie.jpg"))
+                if _sent.photo:
+                    _url = await telegram_file_url(_sent.photo[-1].file_id)
+                    image_urls.append(_url)
+            except Exception:
+                pass
+        if not image_urls and prompt.get("reference_photo_file_id"):
             try:
                 image_urls.append(await telegram_file_url(prompt["reference_photo_file_id"]))
             except Exception:
