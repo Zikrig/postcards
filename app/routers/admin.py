@@ -1,4 +1,5 @@
 """Admin handlers: prompts, feach, promo, edit, delete, import, test."""
+import asyncio
 import json
 import logging
 import os
@@ -599,6 +600,19 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             )
         await callback.answer()
 
+    def _swap_test_button_label(markup: InlineKeyboardMarkup, prompt_id: int, label: str) -> InlineKeyboardMarkup:
+        prefix = f"admin:test:{prompt_id}"
+        new_rows: list[list[InlineKeyboardButton]] = []
+        for row in markup.inline_keyboard:
+            new_row: list[InlineKeyboardButton] = []
+            for btn in row:
+                if getattr(btn, "callback_data", None) == prefix:
+                    new_row.append(InlineKeyboardButton(text=label, callback_data=prefix))
+                else:
+                    new_row.append(btn)
+            new_rows.append(new_row)
+        return InlineKeyboardMarkup(inline_keyboard=new_rows)
+
     @router.callback_query(F.data.startswith("admin:test:"))
     async def admin_test_prompt(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
@@ -616,6 +630,31 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+
+        async def answer_callback_soon() -> None:
+            await asyncio.sleep(0.5)
+            await callback.answer()
+
+        asyncio.create_task(answer_callback_soon())
+
+        orig_markup = callback.message.reply_markup
+        if orig_markup and orig_markup.inline_keyboard:
+            try:
+                green_markup = _swap_test_button_label(orig_markup, prompt_id, "✅ Test")
+                await callback.message.edit_reply_markup(reply_markup=green_markup)
+            except TelegramBadRequest:
+                pass
+            else:
+
+                async def restore_test_button() -> None:
+                    await asyncio.sleep(5)
+                    try:
+                        await callback.message.edit_reply_markup(reply_markup=orig_markup)
+                    except Exception:
+                        pass
+
+                asyncio.create_task(restore_test_button())
+
         template = str(prompt.get("template") or "")
         var_desc = ensure_dict(prompt.get("variable_descriptions") or {})
         variables = extract_variables(template)
@@ -640,7 +679,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if new_balance is None:
             balance = await ctx.repo.get_user_balance(admin_tg_id)
             await callback.message.answer(f"Not enough balance for test. Your balance: {balance}")
-            await callback.answer()
             return
         progress_msg = await callback.message.answer("Test generation…")
         try:
@@ -658,13 +696,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 await progress_msg.delete()
                 err = (details.get("error") or {}) if isinstance(details, dict) else {}
                 await callback.message.answer(f"Test failed: {err.get('message', status)}")
-                await callback.answer()
                 return
             results = details.get("results") or []
             if not results:
                 await progress_msg.delete()
                 await callback.message.answer("No image returned.")
-                await callback.answer()
                 return
             await progress_msg.delete()
             sent = await callback.message.answer_photo(photo=results[0])
@@ -686,7 +722,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             except Exception:
                 pass
             await callback.message.answer(f"Test error: {e}")
-        await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:test_add_ex:"))
     async def admin_test_add_to_examples(callback: CallbackQuery, state: FSMContext) -> None:
