@@ -72,7 +72,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not user["is_authorized"]:
             await message.answer("Please use /start and enter password first.")
             return
-        await message.answer("Please choose a prompt using inline buttons from /start.")
+        await ctx.show_prompt_buttons(message)
 
     @router.callback_query(GenerateStates.waiting_variable, F.data.startswith("gen:opt:"))
     async def generate_option_pick(callback: CallbackQuery, state: FSMContext) -> None:
