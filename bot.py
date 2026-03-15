@@ -906,6 +906,7 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     ])
     rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -921,7 +922,8 @@ def build_feature_config_menu(
     custom = list(feature.get("custom") or [])
     rows = []
     for opt_key, opt_val in opts.items():
-        text_short = btn_label(get_feach_option_text(opt_val) or opt_key, 20)
+        # На кнопке — короткое имя (ключ ≤20 символов), по клику показываем содержание
+        text_short = btn_label(opt_key, 20)
         enabled = get_feach_option_enabled(opt_val)
         rows.append([
             InlineKeyboardButton(text=text_short, callback_data=f"admin:optview:{prompt_id}:{feat_key}:{opt_key}"),
@@ -933,6 +935,7 @@ def build_feature_config_menu(
         ])
     for i, c in enumerate(custom):
         opt_key = f"custom_{i}"
+        # Кастомные опции: на кнопке первые 20 символов текста
         text_short = btn_label(c.get("text", str(c)) if isinstance(c, dict) else str(c), 20)
         enabled = c.get("enabled", True) if isinstance(c, dict) else True
         rows.append([
@@ -947,6 +950,11 @@ def build_feature_config_menu(
     rows.append([
         InlineKeyboardButton(text=btn_label("My own (user types)", 20), callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
         InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
+    ])
+    dont_specify = bool(feature.get("dont_specify", False))
+    rows.append([
+        InlineKeyboardButton(text="Don't specify", callback_data=f"admin:dontspecify:{prompt_id}:{feat_key}"),
+        InlineKeyboardButton(text="ON" if dont_specify else "OFF", callback_data=f"admin:dontspecify:{prompt_id}:{feat_key}"),
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
@@ -963,6 +971,7 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
+            [InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")],
             [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
         ]
     )
@@ -1591,7 +1600,7 @@ def create_router(
             await callback.answer("Admin only", show_alert=True)
             return
         await callback.message.answer(
-            "Prompts: generate from idea (DeepSeek), list, or add manually.",
+            "Prompts: generate from idea, list, or add manually.",
             reply_markup=build_prompt_work_menu(),
         )
         await callback.answer()
@@ -1855,6 +1864,50 @@ def create_router(
             )
         await callback.answer("Deleted")
 
+    @router.callback_query(F.data.startswith("admin:dontspecify:"))
+    async def admin_dont_specify_toggle(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        feat["dont_specify"] = not feat.get("dont_specify", False)
+        await repo.update_prompt_feach_data(prompt_id, feach_data)
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            feat = feach_data.get("features", {}).get(feat_key, {})
+            varname = feat.get("varname", feat_key)
+            about = feat.get("about", "")
+            try:
+                await callback.message.edit_reply_markup(
+                    reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+                )
+            except TelegramBadRequest:
+                pass
+        await callback.answer("ON" if feat.get("dont_specify") else "OFF")
+
     @router.callback_query(F.data.startswith("admin:myown:"))
     async def admin_myown_toggle(callback: CallbackQuery) -> None:
         if not callback.message:
@@ -2062,6 +2115,8 @@ def create_router(
             }
         ]
         for feat_key, feat in features.items():
+            if feat.get("dont_specify"):
+                continue
             varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
             opts = feat.get("options") or {}
             custom = feat.get("custom") or []
@@ -2127,6 +2182,143 @@ def create_router(
                 f"Template: {template[:300]}…" if len(template) > 300 else f"Template: {template}",
                 reply_markup=build_prompt_feach_menu(prompt_id, feach_data, bool(prompt.get("is_active", True))),
             )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:test:"))
+    async def admin_test_prompt(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        template = str(prompt.get("template") or "")
+        var_desc = ensure_dict(prompt.get("variable_descriptions") or {})
+        variables = extract_variables(template)
+        answers: dict[str, str] = {}
+        for var in variables:
+            token = variable_token(var)
+            cfg = get_variable_config(var_desc, token, var["type"])
+            opts = [str(x) for x in (cfg.get("options") or []) if str(x).strip()]
+            if var["type"] == "text" and opts:
+                answers[var["name"]] = opts[0]
+            else:
+                answers[var["name"]] = ""
+        final_prompt = render_prompt(template, answers)
+        image_urls: list[str] = []
+        if prompt.get("reference_photo_file_id"):
+            try:
+                image_urls.append(await telegram_file_url(prompt["reference_photo_file_id"]))
+            except Exception:
+                pass
+        admin_tg_id = callback.from_user.id
+        new_balance = await repo.consume_generation_token(admin_tg_id)
+        if new_balance is None:
+            balance = await repo.get_user_balance(admin_tg_id)
+            await callback.message.answer(f"Not enough balance for test. Your balance: {balance}")
+            await callback.answer()
+            return
+        progress_msg = await callback.message.answer("Test generation…")
+        try:
+            task_id = await evo.create_task(final_prompt, image_urls=image_urls)
+
+            async def update_progress(status: Any, progress: Any) -> None:
+                try:
+                    await progress_msg.edit_text(f"Test generation… {status or 'processing'} {progress or '?'}%")
+                except TelegramBadRequest:
+                    pass
+
+            details = await evo.wait_for_completion(task_id, on_progress=update_progress)
+            status = details.get("status")
+            if status != "completed":
+                await progress_msg.delete()
+                err = (details.get("error") or {}) if isinstance(details, dict) else {}
+                await callback.message.answer(f"Test failed: {err.get('message', status)}")
+                await callback.answer()
+                return
+            results = details.get("results") or []
+            if not results:
+                await progress_msg.delete()
+                await callback.message.answer("No image returned.")
+                await callback.answer()
+                return
+            await progress_msg.delete()
+            sent = await callback.message.answer_photo(photo=results[0])
+            file_id = sent.photo[-1].file_id if sent.photo else None
+            if file_id:
+                await state.update_data(admin_test_prompt_id=prompt_id, admin_test_file_id=file_id)
+                await callback.message.answer(
+                    "Add this image to prompt examples?",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="Yes", callback_data=f"admin:test_add_ex:{prompt_id}")],
+                        [InlineKeyboardButton(text="No", callback_data="admin:test_add_no")],
+                    ]),
+                )
+            else:
+                await callback.message.answer("Test done (could not get file_id).")
+        except Exception as e:
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+            await callback.message.answer(f"Test error: {e}")
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:test_add_ex:"))
+    async def admin_test_add_to_examples(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        data = await state.get_data()
+        file_id = data.get("admin_test_file_id")
+        if not file_id:
+            await callback.answer("Session expired", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        current = prompt.get("example_file_ids") or []
+        if not isinstance(current, list):
+            current = []
+        current = [str(x) for x in current][:3]
+        if len(current) >= 3:
+            current = current[:2] + [str(file_id)]
+        else:
+            current = current + [str(file_id)]
+        await repo.set_prompt_examples(prompt_id, current)
+        await state.clear()
+        try:
+            await callback.message.edit_text("Added to examples.")
+        except TelegramBadRequest:
+            await callback.message.answer("Added to examples.")
+        await callback.answer("Added")
+
+    @router.callback_query(F.data == "admin:test_add_no")
+    async def admin_test_add_no(callback: CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
+        if callback.message:
+            try:
+                await callback.message.edit_text("Cancelled.")
+            except TelegramBadRequest:
+                pass
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:active:"))
