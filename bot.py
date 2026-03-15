@@ -22,6 +22,11 @@ from aiogram.types import (
 )
 from dotenv import load_dotenv
 
+try:
+    from deepseek_client import DeepSeekClient
+except ImportError:
+    DeepSeekClient = None  # type: ignore[misc, assignment]
+
 
 def parse_admin_ids(raw: str) -> set[int]:
     result: set[int] = set()
@@ -102,6 +107,10 @@ class AdminStates(StatesGroup):
     waiting_text_options = State()
     waiting_text_allow_custom = State()
     waiting_prompt_reference = State()
+    waiting_gen_title = State()
+    waiting_gen_idea = State()
+    waiting_feach_add_option = State()
+    waiting_import_json = State()
     waiting_promo_code = State()
     waiting_promo_credits = State()
     waiting_promo_max_uses = State()
@@ -158,6 +167,45 @@ def ensure_dict(value: Any) -> dict[str, Any]:
         except json.JSONDecodeError:
             return {}
     return {}
+
+
+def normalize_feach_for_storage(api_feach: dict[str, Any]) -> dict[str, Any]:
+    """Convert DeepSeek feach response to storage format: options as {text, enabled}, my_own, custom."""
+    idea = api_feach.get("idea", "")
+    features = api_feach.get("features") or {}
+    out_features: dict[str, Any] = {}
+    for key, feat in features.items():
+        if not isinstance(feat, dict):
+            continue
+        opts = feat.get("options") or {}
+        if not isinstance(opts, dict):
+            opts = {}
+        normalized_opts: dict[str, Any] = {}
+        for opt_k, opt_v in opts.items():
+            if isinstance(opt_v, dict) and "text" in opt_v:
+                normalized_opts[opt_k] = {"text": str(opt_v.get("text", "")), "enabled": bool(opt_v.get("enabled", True))}
+            else:
+                normalized_opts[opt_k] = {"text": str(opt_v) if opt_v is not None else "", "enabled": True}
+        out_features[key] = {
+            "varname": feat.get("varname", key),
+            "about": feat.get("about", ""),
+            "options": normalized_opts,
+            "my_own": feat.get("my_own", True),
+            "custom": list(feat.get("custom") or []),
+        }
+    return {"idea": idea, "features": out_features}
+
+
+def get_feach_option_text(opt_value: Any) -> str:
+    if isinstance(opt_value, dict) and "text" in opt_value:
+        return str(opt_value.get("text", ""))
+    return str(opt_value) if opt_value is not None else ""
+
+
+def get_feach_option_enabled(opt_value: Any) -> bool:
+    if isinstance(opt_value, dict):
+        return bool(opt_value.get("enabled", True))
+    return True
 
 
 class EvoClient:
@@ -286,6 +334,18 @@ class Repo:
             )
             await conn.execute(
                 """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;
+                """
+            )
+            await conn.execute(
+                """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS feach_data JSONB;
+                """
+            )
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bot_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -395,8 +455,12 @@ class Repo:
                 return None
             return int(row["balance_tokens"] or 0)
 
-    async def list_prompts(self) -> list[asyncpg.Record]:
+    async def list_prompts(self, active_only: bool = False) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
+            if active_only:
+                return await conn.fetch(
+                    "SELECT * FROM prompts WHERE is_active = TRUE ORDER BY id DESC"
+                )
             return await conn.fetch("SELECT * FROM prompts ORDER BY id DESC")
 
     async def get_prompt_by_title(self, title: str) -> Optional[asyncpg.Record]:
@@ -411,21 +475,25 @@ class Repo:
         self,
         title: str,
         template: str,
-        variable_descriptions: dict[str, str],
+        variable_descriptions: dict[str, Any],
         reference_photo_file_id: Optional[str],
         created_by: int,
+        is_active: bool = True,
+        feach_data: Optional[dict[str, Any]] = None,
     ) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by)
-                VALUES ($1, $2, $3::jsonb, $4, $5)
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, is_active, feach_data)
+                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)
                 """,
                 title,
                 template,
                 json.dumps(variable_descriptions),
                 reference_photo_file_id,
                 created_by,
+                is_active,
+                json.dumps(feach_data) if feach_data is not None else None,
             )
 
     async def update_prompt(
@@ -433,7 +501,7 @@ class Repo:
         prompt_id: int,
         title: str,
         template: str,
-        variable_descriptions: dict[str, str],
+        variable_descriptions: dict[str, Any],
         reference_photo_file_id: Optional[str],
     ) -> None:
         async with self.pool.acquire() as conn:
@@ -450,6 +518,24 @@ class Repo:
                 template,
                 json.dumps(variable_descriptions),
                 reference_photo_file_id,
+                prompt_id,
+            )
+
+    async def set_prompt_active(self, prompt_id: int, is_active: bool) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE prompts SET is_active = $1 WHERE id = $2",
+                is_active,
+                prompt_id,
+            )
+
+    async def update_prompt_feach_data(
+        self, prompt_id: int, feach_data: Optional[dict[str, Any]]
+    ) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE prompts SET feach_data = $1::jsonb WHERE id = $2",
+                json.dumps(feach_data) if feach_data is not None else None,
                 prompt_id,
             )
 
@@ -609,29 +695,101 @@ def build_admin_menu() -> InlineKeyboardMarkup:
 def build_prompt_work_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="Add prompt", callback_data="admin:pw:add")],
+            [InlineKeyboardButton(text="Generate new prompt", callback_data="admin:gen:start")],
+            [InlineKeyboardButton(text="List of prompts", callback_data="admin:pw:list")],
+            [InlineKeyboardButton(text="Add prompt (manual)", callback_data="admin:pw:add")],
+            [InlineKeyboardButton(text="Import JSON", callback_data="admin:import")],
             [InlineKeyboardButton(text="Back", callback_data="admin:pw:back")],
         ]
     )
 
 
 def build_prompt_list_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=p["title"], callback_data=f"admin:pw:item:{p['id']}")]
-        for p in prompts
-    ]
-    rows.extend(build_prompt_work_menu().inline_keyboard)
+    rows = []
+    for p in prompts:
+        active = p.get("is_active", True)
+        label = f"{'🟢' if active else '🔴'} {p['title']}"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:pw:item:{p['id']}")])
+    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:prompt_work")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_item_menu(prompt_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
-            [InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")],
-            [InlineKeyboardButton(text="Back to list", callback_data="admin:prompt_work")],
-        ]
-    )
+def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
+        [InlineKeyboardButton(
+            text="Deactivate" if is_active else "Activate",
+            callback_data=f"admin:active:{prompt_id}",
+        )],
+        [InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")],
+        [InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")],
+        [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_active: bool) -> InlineKeyboardMarkup:
+    """Menu for a draft prompt: idea + feature buttons, Generate final, Activate, Export, Back."""
+    features = feach_data.get("features") or {}
+    rows = []
+    for feat_key in features:
+        rows.append([
+            InlineKeyboardButton(text=feat_key, callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+        ])
+    rows.append([
+        InlineKeyboardButton(text="Generate final prompt", callback_data=f"admin:final:{prompt_id}"),
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            text="Deactivate" if is_active else "Activate",
+            callback_data=f"admin:active:{prompt_id}",
+        ),
+    ])
+    rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_feature_config_menu(
+    prompt_id: int,
+    feat_key: str,
+    feature: dict[str, Any],
+) -> InlineKeyboardMarkup:
+    """Option rows (text + green/red), My own, Add, Done. Option view = show full text on click."""
+    opts = feature.get("options") or {}
+    custom = list(feature.get("custom") or [])
+    rows = []
+    for opt_key, opt_val in opts.items():
+        text_short = (get_feach_option_text(opt_val) or "")[:20] or opt_key
+        enabled = get_feach_option_enabled(opt_val)
+        rows.append([
+            InlineKeyboardButton(text=text_short, callback_data=f"admin:optview:{prompt_id}:{feat_key}:{opt_key}"),
+            InlineKeyboardButton(
+                text="🟢" if enabled else "🔴",
+                callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
+            ),
+        ])
+    for i, c in enumerate(custom):
+        opt_key = f"custom_{i}"
+        text_short = (c.get("text", str(c)) if isinstance(c, dict) else str(c))[:20]
+        enabled = c.get("enabled", True) if isinstance(c, dict) else True
+        rows.append([
+            InlineKeyboardButton(text=text_short, callback_data=f"admin:optview:{prompt_id}:{feat_key}:{opt_key}"),
+            InlineKeyboardButton(
+                text="🟢" if enabled else "🔴",
+                callback_data=f"admin:opt:{prompt_id}:{feat_key}:{opt_key}:{'0' if enabled else '1'}",
+            ),
+        ])
+    my_own = feature.get("my_own", True)
+    rows.append([
+        InlineKeyboardButton(text="My own (user types)", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
+        InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
+    ])
+    rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
+    rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
+    rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:pw:item:{prompt_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
@@ -642,7 +800,7 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Edit variable descriptions", callback_data=f"admin:editpart:variables:{prompt_id}")],
             [InlineKeyboardButton(text="Replace reference image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove reference image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
-            [InlineKeyboardButton(text="Back to list", callback_data="admin:prompt_work")],
+            [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
         ]
     )
 
@@ -710,7 +868,13 @@ def build_promo_item_menu(promo_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> Router:
+def create_router(
+    repo: Repo,
+    settings: Settings,
+    evo: EvoClient,
+    bot: Bot,
+    deepseek: Optional[Any] = None,
+) -> Router:
     router = Router()
     BALANCE_BUCKET_KEY = "last_user_remaining_bucket_20"
 
@@ -734,7 +898,7 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         return parts[1].strip()
 
     async def show_prompt_buttons(message: Message) -> None:
-        prompts = await repo.list_prompts()
+        prompts = await repo.list_prompts(active_only=True)
         if not prompts:
             await message.answer("No prompts yet. Please wait for admin to add them.")
             return
@@ -1200,15 +1364,536 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
+        await callback.message.answer(
+            "Prompts: generate from idea (DeepSeek), list, or add manually.",
+            reply_markup=build_prompt_work_menu(),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:pw:list")
+    async def admin_prompt_list(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
         prompts = await repo.list_prompts()
-        if prompts:
-            await callback.message.answer("Prompt list:", reply_markup=build_prompt_list_menu(prompts))
-        else:
+        if not prompts:
             await callback.message.answer(
-                "Prompt list is empty.",
+                "No prompts yet. Use «Generate new prompt» or «Add prompt (manual)».",
                 reply_markup=build_prompt_work_menu(),
             )
+        else:
+            await callback.message.answer("List of prompts:", reply_markup=build_prompt_list_menu(prompts))
         await callback.answer()
+
+    @router.callback_query(F.data == "admin:gen:start")
+    async def admin_gen_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        if not deepseek:
+            await callback.answer("DeepSeek client not available.", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_gen_title)
+        await callback.message.answer("Enter prompt title (as shown in the bot):")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_gen_title)
+    async def admin_gen_title(message: Message, state: FSMContext) -> None:
+        title = (message.text or "").strip()
+        if not title:
+            await message.answer("Title cannot be empty. Enter title:")
+            return
+        await state.update_data(gen_title=title)
+        await state.set_state(AdminStates.waiting_gen_idea)
+        await message.answer("Enter the main idea for the image (this will be sent to DeepSeek):")
+
+    @router.message(AdminStates.waiting_gen_idea)
+    async def admin_gen_idea(message: Message, state: FSMContext) -> None:
+        idea = (message.text or "").strip()
+        if not idea:
+            await message.answer("Idea cannot be empty. Enter idea:")
+            return
+        data = await state.get_data()
+        title = data.get("gen_title", "")
+        if not title:
+            await message.answer("Session expired. Start from «Generate new prompt» again.")
+            await state.clear()
+            return
+        user = await repo.get_user(message.from_user.id)
+        if not user or not deepseek:
+            await message.answer("Error: unavailable.")
+            await state.clear()
+            return
+        try:
+            await message.answer("Calling DeepSeek…")
+            api_feach = await deepseek.refine_idea(idea)
+            normalized = normalize_feach_for_storage(api_feach)
+        except Exception as e:
+            await message.answer(f"DeepSeek error: {e}")
+            await state.clear()
+            return
+        try:
+            await repo.insert_prompt(
+                title=title,
+                template=idea,
+                variable_descriptions={},
+                reference_photo_file_id=None,
+                created_by=user["tg_id"],
+                is_active=False,
+                feach_data=normalized,
+            )
+        except asyncpg.UniqueViolationError:
+            await message.answer("A prompt with this title already exists. Choose another title.")
+            return
+        await state.clear()
+        await message.answer(
+            "Draft prompt created. Open «List of prompts» to configure features and generate the final prompt.",
+            reply_markup=build_prompt_work_menu(),
+        )
+
+    @router.callback_query(F.data.startswith("admin:feach:"))
+    async def admin_feach_feature(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        varname = feat.get("varname", feat_key)
+        about = feat.get("about", "")
+        await callback.message.answer(
+            f"Variable: {varname}\nAbout: {about}",
+            reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:opt:"))
+    async def admin_opt_toggle(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 6:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        opt_key = parts[4]
+        enabled = parts[5] == "1"
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        opts = feat.get("options") or {}
+        if opt_key.startswith("custom_"):
+            custom = list(feat.get("custom") or [])
+            idx = int(opt_key.replace("custom_", "")) if opt_key.replace("custom_", "").isdigit() else -1
+            if 0 <= idx < len(custom):
+                if isinstance(custom[idx], dict):
+                    custom[idx] = {**custom[idx], "enabled": enabled}
+                else:
+                    custom[idx] = {"text": str(custom[idx]), "enabled": enabled}
+                feat["custom"] = custom
+        else:
+            if opt_key in opts:
+                if isinstance(opts[opt_key], dict):
+                    opts[opt_key]["enabled"] = enabled
+                else:
+                    opts[opt_key] = {"text": get_feach_option_text(opts[opt_key]), "enabled": enabled}
+        await repo.update_prompt_feach_data(prompt_id, feach_data)
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            await callback.message.answer(
+                "Updated.",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:myown:"))
+    async def admin_myown_toggle(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        feat["my_own"] = not feat.get("my_own", True)
+        await repo.update_prompt_feach_data(prompt_id, feach_data)
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            await callback.message.answer(
+                "My own: " + ("ON" if feat["my_own"] else "OFF"),
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:featadd:"))
+    async def admin_feat_add_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        await state.update_data(feach_add_prompt_id=prompt_id, feach_add_feat_key=feat_key)
+        await state.set_state(AdminStates.waiting_feach_add_option)
+        await callback.message.answer("Send the new option text:")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_feach_add_option)
+    async def admin_feach_add_option_value(message: Message, state: FSMContext) -> None:
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Send non-empty option text:")
+            return
+        data = await state.get_data()
+        prompt_id = data.get("feach_add_prompt_id")
+        feat_key = data.get("feach_add_feat_key")
+        if prompt_id is None or not feat_key:
+            await message.answer("Session expired.")
+            await state.clear()
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await message.answer("Prompt not found.")
+            await state.clear()
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await message.answer("Feature not found.")
+            await state.clear()
+            return
+        feat = features[feat_key]
+        custom = list(feat.get("custom") or [])
+        custom.append({"text": text, "enabled": True})
+        feat["custom"] = custom
+        await repo.update_prompt_feach_data(prompt_id, feach_data)
+        await state.clear()
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            await message.answer(
+                "Option added.",
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
+            )
+
+    @router.callback_query(F.data.startswith("admin:featdone:"))
+    async def admin_feat_done(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        is_active = bool(prompt.get("is_active", True))
+        await callback.message.answer("Done. Back to prompt.", reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active))
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:optview:"))
+    async def admin_opt_view(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        feat_key = parts[3]
+        opt_key = parts[4]
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+        feat = features[feat_key]
+        opts = feat.get("options") or {}
+        custom = feat.get("custom") or []
+        if opt_key.startswith("custom_"):
+            idx = int(opt_key.replace("custom_", "")) if opt_key.replace("custom_", "").isdigit() else -1
+            text = custom[idx].get("text", str(custom[idx])) if 0 <= idx < len(custom) and isinstance(custom[idx], dict) else (str(custom[idx]) if 0 <= idx < len(custom) else "")
+        else:
+            opt_val = opts.get(opt_key)
+            text = get_feach_option_text(opt_val)
+        await callback.answer(text[:200] if text else "—", show_alert=True)
+
+    @router.callback_query(F.data.startswith("admin:final:"))
+    async def admin_final_prompt(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        if not deepseek:
+            await callback.answer("DeepSeek not available", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        idea = feach_data.get("idea", "")
+        variables_spec: list[dict[str, Any]] = []
+        for feat_key, feat in features.items():
+            varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
+            opts = feat.get("options") or {}
+            custom = feat.get("custom") or []
+            enabled_opts = []
+            for opt_k, opt_v in opts.items():
+                if get_feach_option_enabled(opt_v):
+                    enabled_opts.append(get_feach_option_text(opt_v))
+            for c in custom:
+                if isinstance(c, dict) and c.get("enabled", True):
+                    enabled_opts.append(c.get("text", ""))
+                elif isinstance(c, str):
+                    enabled_opts.append(c)
+            my_own = feat.get("my_own", True)
+            if len(enabled_opts) <= 1 and not my_own and not custom:
+                variables_spec.append({"name": varname, "type": "text", "constant": (enabled_opts[0] if enabled_opts else ""), "options": None, "allow_custom": False, "about": feat.get("about", "")})
+            else:
+                variables_spec.append({"name": varname, "type": "text", "constant": None, "options": enabled_opts, "allow_custom": my_own, "about": feat.get("about", "")})
+        try:
+            await callback.message.answer("Generating final prompt…")
+            result = await deepseek.generate_final_prompt(idea, variables_spec)
+        except Exception as e:
+            await callback.message.answer(f"DeepSeek error: {e}")
+            await callback.answer()
+            return
+        template = result.get("template", "")
+        var_descriptions = ensure_dict(result.get("variable_descriptions") or {})
+        await repo.update_prompt(prompt_id, prompt["title"], template, var_descriptions, prompt.get("reference_photo_file_id"))
+        await callback.message.answer("Final prompt saved. You can activate it or edit further.")
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            await callback.message.answer(
+                f"Template: {template[:300]}…" if len(template) > 300 else f"Template: {template}",
+                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, bool(prompt.get("is_active", True))),
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:active:"))
+    async def admin_toggle_active(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        new_active = not bool(prompt.get("is_active", True))
+        await repo.set_prompt_active(prompt_id, new_active)
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer()
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {}) if prompt.get("feach_data") else None
+        is_active = bool(prompt.get("is_active", True))
+        if feach_data and feach_data.get("features"):
+            await callback.message.answer(
+                f"Prompt: {prompt['title']}\nIdea: {feach_data.get('idea', '')}",
+                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+            )
+        else:
+            await callback.message.answer(f"Prompt: {prompt['title']}", reply_markup=build_prompt_item_menu(prompt_id, is_active))
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:export:"))
+    async def admin_export_prompt(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        payload = {
+            "title": prompt["title"],
+            "template": prompt["template"],
+            "variable_descriptions": dict(prompt.get("variable_descriptions") or {}),
+            "is_active": bool(prompt.get("is_active", True)),
+            "reference_photo_file_id": prompt.get("reference_photo_file_id"),
+            "feach_data": prompt.get("feach_data"),
+        }
+        from io import BytesIO
+        buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+        buf.seek(0)
+        from aiogram.types import BufferedInputFile
+        await callback.message.answer_document(
+            BufferedInputFile(buf.getvalue(), filename=f"prompt_{prompt_id}.json"),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:import")
+    async def admin_import_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.set_state(AdminStates.waiting_import_json)
+        await callback.message.answer("Send a JSON file (exported prompt) to import. It will create or update a prompt by title.")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_import_json, F.document)
+    async def admin_import_document(message: Message, state: FSMContext) -> None:
+        if not message.document:
+            return
+        doc = message.document
+        if not doc.file_name or not doc.file_name.endswith(".json"):
+            await message.answer("Send a .json file.")
+            return
+        try:
+            file = await bot.get_file(doc.file_id)
+            buf = await bot.download_file(file.file_path)
+            raw = buf.read().decode("utf-8") if hasattr(buf, "read") else buf.getvalue().decode("utf-8")
+            payload = json.loads(raw)
+        except Exception as e:
+            await message.answer(f"Failed to read file: {e}")
+            return
+        title = (payload.get("title") or "").strip()
+        if not title:
+            await message.answer("JSON must contain 'title'.")
+            await state.clear()
+            return
+        user = await repo.get_user(message.from_user.id)
+        if not user:
+            await message.answer("User not found.")
+            await state.clear()
+            return
+        template = payload.get("template") or ""
+        var_descriptions = ensure_dict(payload.get("variable_descriptions") or {})
+        is_active = bool(payload.get("is_active", True))
+        ref_id = payload.get("reference_photo_file_id")
+        feach_data = payload.get("feach_data")
+        existing = await repo.get_prompt_by_title(title)
+        try:
+            if existing:
+                await repo.update_prompt(existing["id"], title, template, var_descriptions, ref_id)
+                await repo.set_prompt_active(existing["id"], is_active)
+                if feach_data is not None:
+                    await repo.update_prompt_feach_data(existing["id"], feach_data)
+                await message.answer(f"Prompt «{title}» updated.")
+            else:
+                await repo.insert_prompt(title, template, var_descriptions, ref_id, user["tg_id"], is_active=is_active, feach_data=feach_data)
+                await message.answer(f"Prompt «{title}» created.")
+        except Exception as e:
+            await message.answer(f"Error: {e}")
+        await state.clear()
 
     @router.callback_query(F.data == "admin:pw:back")
     async def admin_prompt_work_back(callback: CallbackQuery) -> None:
@@ -1464,10 +2149,19 @@ def create_router(repo: Repo, settings: Settings, evo: EvoClient, bot: Bot) -> R
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
-        await callback.message.answer(
-            f"Prompt: {prompt['title']}",
-            reply_markup=build_prompt_item_menu(prompt_id),
-        )
+        feach_data = ensure_dict(prompt.get("feach_data") or {}) if prompt.get("feach_data") else None
+        is_active = bool(prompt.get("is_active", True))
+        if feach_data and feach_data.get("features"):
+            idea = feach_data.get("idea", "")
+            await callback.message.answer(
+                f"Prompt: {prompt['title']}\n\nIdea: {idea}",
+                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+            )
+        else:
+            await callback.message.answer(
+                f"Prompt: {prompt['title']}",
+                reply_markup=build_prompt_item_menu(prompt_id, is_active),
+            )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("prompt:select:"))
@@ -2493,7 +3187,8 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher()
     evo = EvoClient(settings)
-    dp.include_router(create_router(repo, settings, evo, bot))
+    deepseek = DeepSeekClient() if DeepSeekClient else None
+    dp.include_router(create_router(repo, settings, evo, bot, deepseek))
 
     logging.info("Bot started")
     await dp.start_polling(bot)
