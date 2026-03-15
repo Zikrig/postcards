@@ -111,6 +111,7 @@ class AdminStates(StatesGroup):
     waiting_gen_idea = State()
     waiting_feach_add_option = State()
     waiting_import_json = State()
+    waiting_prompt_examples = State()
     waiting_promo_code = State()
     waiting_promo_credits = State()
     waiting_promo_max_uses = State()
@@ -346,6 +347,12 @@ class Repo:
             )
             await conn.execute(
                 """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS example_file_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+                """
+            )
+            await conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS bot_state (
                     key TEXT PRIMARY KEY,
                     value TEXT NOT NULL
@@ -543,6 +550,16 @@ class Repo:
             await conn.execute(
                 "UPDATE prompts SET feach_data = $1::jsonb WHERE id = $2",
                 json.dumps(feach_data) if feach_data is not None else None,
+                prompt_id,
+            )
+
+    async def set_prompt_examples(self, prompt_id: int, example_file_ids: list[str]) -> None:
+        if len(example_file_ids) > 3:
+            example_file_ids = example_file_ids[:3]
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE prompts SET example_file_ids = $1::jsonb WHERE id = $2",
+                json.dumps(example_file_ids),
                 prompt_id,
             )
 
@@ -808,6 +825,7 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Edit variable descriptions", callback_data=f"admin:editpart:variables:{prompt_id}")],
             [InlineKeyboardButton(text="Replace reference image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove reference image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
+            [InlineKeyboardButton(text="Set examples (1–3 images)", callback_data=f"admin:editpart:examples:{prompt_id}")],
             [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
         ]
     )
@@ -1865,35 +1883,49 @@ def create_router(
     async def admin_export_prompt(callback: CallbackQuery) -> None:
         if not callback.message:
             return
+        logging.info("admin_export_prompt: callback.data=%r", callback.data)
         user = await repo.get_user(callback.from_user.id)
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
         try:
-            prompt_id = int((callback.data or "").split(":")[-1])
-        except ValueError:
-            await callback.answer("Invalid", show_alert=True)
-            return
-        prompt = await repo.get_prompt_by_id(prompt_id)
-        if not prompt:
-            await callback.answer("Prompt not found", show_alert=True)
-            return
-        payload = {
-            "title": prompt["title"],
-            "template": prompt["template"],
-            "variable_descriptions": dict(prompt.get("variable_descriptions") or {}),
-            "is_active": bool(prompt.get("is_active", True)),
-            "reference_photo_file_id": prompt.get("reference_photo_file_id"),
-            "feach_data": prompt.get("feach_data"),
-        }
-        from io import BytesIO
-        buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
-        buf.seek(0)
-        from aiogram.types import BufferedInputFile
-        await callback.message.answer_document(
-            BufferedInputFile(buf.getvalue(), filename=f"prompt_{prompt_id}.json"),
-        )
-        await callback.answer()
+            try:
+                prompt_id = int((callback.data or "").split(":")[-1])
+            except ValueError:
+                logging.warning("admin_export_prompt: invalid prompt id in data=%r", callback.data)
+                await callback.answer("Invalid", show_alert=True)
+                return
+            logging.info("admin_export_prompt: prompt_id=%s", prompt_id)
+            prompt = await repo.get_prompt_by_id(prompt_id)
+            if not prompt:
+                logging.warning("admin_export_prompt: prompt %s not found", prompt_id)
+                await callback.answer("Prompt not found", show_alert=True)
+                return
+            payload = {
+                "title": prompt["title"],
+                "template": prompt["template"],
+                "variable_descriptions": dict(prompt.get("variable_descriptions") or {}),
+                "is_active": bool(prompt.get("is_active", True)),
+                "reference_photo_file_id": prompt.get("reference_photo_file_id"),
+                "feach_data": prompt.get("feach_data"),
+                "example_file_ids": prompt.get("example_file_ids") if isinstance(prompt.get("example_file_ids"), list) else [],
+            }
+            logging.info("admin_export_prompt: payload built for prompt_id=%s (title=%r)", prompt_id, payload["title"])
+            from io import BytesIO
+            buf = BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"))
+            buf.seek(0)
+            from aiogram.types import BufferedInputFile
+            await callback.message.answer_document(
+                BufferedInputFile(buf.getvalue(), filename=f"prompt_{prompt_id}.json"),
+            )
+            logging.info("admin_export_prompt: document sent for prompt_id=%s", prompt_id)
+            await callback.answer()
+        except Exception:
+            logging.exception("admin_export_prompt: unexpected error")
+            try:
+                await callback.answer("Export failed", show_alert=True)
+            except Exception:
+                pass
 
     @router.callback_query(F.data == "admin:import")
     async def admin_import_start(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1938,6 +1970,10 @@ def create_router(
         is_active = bool(payload.get("is_active", True))
         ref_id = payload.get("reference_photo_file_id")
         feach_data = payload.get("feach_data")
+        example_ids = payload.get("example_file_ids")
+        if not isinstance(example_ids, list):
+            example_ids = []
+        example_ids = [str(x) for x in example_ids][:3]
         existing = await repo.get_prompt_by_title(title)
         try:
             if existing:
@@ -1945,9 +1981,13 @@ def create_router(
                 await repo.set_prompt_active(existing["id"], is_active)
                 if feach_data is not None:
                     await repo.update_prompt_feach_data(existing["id"], feach_data)
+                await repo.set_prompt_examples(existing["id"], example_ids)
                 await message.answer(f"Prompt «{title}» updated.")
             else:
                 await repo.insert_prompt(title, template, var_descriptions, ref_id, user["tg_id"], is_active=is_active, feach_data=feach_data)
+                new_prompt = await repo.get_prompt_by_title(title)
+                if new_prompt and example_ids:
+                    await repo.set_prompt_examples(new_prompt["id"], example_ids)
                 await message.answer(f"Prompt «{title}» created.")
         except Exception as e:
             await message.answer(f"Error: {e}")
@@ -2774,6 +2814,39 @@ def create_router(
             await show_prompt_edit_actions(callback.message, updated_prompt)
         await callback.answer()
 
+    @router.callback_query(F.data.startswith("admin:editpart:examples:"))
+    async def admin_edit_prompt_examples_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        current = prompt.get("example_file_ids")
+        if isinstance(current, str):
+            try:
+                current = json.loads(current) if current else []
+            except json.JSONDecodeError:
+                current = []
+        elif not isinstance(current, list):
+            current = []
+        await state.clear()
+        await state.update_data(editing_prompt_id=prompt_id, example_file_ids=list(current))
+        await state.set_state(AdminStates.waiting_prompt_examples)
+        await callback.message.answer(
+            "Send 1 to 3 photos as examples. Send /done after the last one or /skip to clear examples."
+        )
+        await callback.answer()
+
     @router.callback_query(F.data.startswith("admin:delete:"))
     async def admin_delete_prompt_confirm(callback: CallbackQuery) -> None:
         if not callback.message:
@@ -3093,6 +3166,67 @@ def create_router(
     @router.message(AdminStates.waiting_prompt_reference)
     async def admin_prompt_reference_invalid(message: Message) -> None:
         await message.answer("Send an image or /skip.")
+
+    @router.message(AdminStates.waiting_prompt_examples, Command("done"))
+    async def admin_prompt_examples_done(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        file_ids = data.get("example_file_ids") or []
+        if not isinstance(file_ids, list):
+            file_ids = []
+        await state.clear()
+        if prompt_id is None:
+            await message.answer("Session expired. Open prompt edit again.")
+            return
+        await repo.set_prompt_examples(int(prompt_id), file_ids)
+        prompt = await repo.get_prompt_by_id(int(prompt_id))
+        await message.answer(f"Examples saved ({len(file_ids)}).")
+        if prompt:
+            await show_prompt_edit_actions(message, prompt)
+
+    @router.message(AdminStates.waiting_prompt_examples, Command("skip"))
+    async def admin_prompt_examples_skip(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        await state.clear()
+        if prompt_id is not None:
+            await repo.set_prompt_examples(int(prompt_id), [])
+        await message.answer("Examples cleared.")
+        if prompt_id is not None:
+            prompt = await repo.get_prompt_by_id(int(prompt_id))
+            if prompt:
+                await show_prompt_edit_actions(message, prompt)
+
+    @router.message(AdminStates.waiting_prompt_examples, F.photo)
+    async def admin_prompt_examples_photo(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            await state.clear()
+            await message.answer("Session expired. Open prompt edit again.")
+            return
+        file_ids = list(data.get("example_file_ids") or [])
+        if not isinstance(file_ids, list):
+            file_ids = []
+        if len(file_ids) >= 3:
+            await message.answer("Already 3 examples. Send /done to save or /skip to clear.")
+            return
+        file_id = message.photo[-1].file_id
+        file_ids.append(file_id)
+        await state.update_data(example_file_ids=file_ids)
+        if len(file_ids) >= 3:
+            await repo.set_prompt_examples(int(prompt_id), file_ids)
+            await state.clear()
+            prompt = await repo.get_prompt_by_id(int(prompt_id))
+            await message.answer("Saved 3 examples.")
+            if prompt:
+                await show_prompt_edit_actions(message, prompt)
+        else:
+            await message.answer(f"Added ({len(file_ids)}/3). Send another photo or /done.")
+
+    @router.message(AdminStates.waiting_prompt_examples)
+    async def admin_prompt_examples_invalid(message: Message) -> None:
+        await message.answer("Send 1–3 photos, then /done, or /skip to clear examples.")
 
     @router.message(StateFilter(None))
     async def prompt_pick_handler(message: Message, state: FSMContext) -> None:
