@@ -101,6 +101,26 @@ class Repo:
                 );
                 """
             )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS tags (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL
+                );
+                """
+            )
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_tags (
+                    prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+                    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    PRIMARY KEY (prompt_id, tag_id)
+                );
+                """
+            )
+            main_menu_tag = await conn.fetchrow("SELECT id FROM tags WHERE name = $1", "Main Menu")
+            if not main_menu_tag:
+                await conn.execute("INSERT INTO tags (name) VALUES ($1)", "Main Menu")
 
     async def upsert_user(
         self,
@@ -278,6 +298,105 @@ class Repo:
                 "UPDATE prompts SET example_file_ids = $1::jsonb WHERE id = $2",
                 json.dumps(example_file_ids),
                 prompt_id,
+            )
+
+    async def list_tags(self) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetch("SELECT * FROM tags ORDER BY name")
+
+    async def get_tag_by_id(self, tag_id: int) -> Optional[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("SELECT * FROM tags WHERE id = $1", tag_id)
+
+    async def get_tag_by_name(self, name: str) -> Optional[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            return await conn.fetchrow("SELECT * FROM tags WHERE name = $1", name.strip())
+
+    async def create_tag(self, name: str) -> asyncpg.Record:
+        name = name.strip()
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "INSERT INTO tags (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = $1 RETURNING *",
+                name,
+            )
+            return row
+
+    async def update_tag(self, tag_id: int, name: str) -> None:
+        name = name.strip()
+        async with self.pool.acquire() as conn:
+            await conn.execute("UPDATE tags SET name = $1 WHERE id = $2", name, tag_id)
+
+    async def delete_tag(self, tag_id: int) -> bool:
+        async with self.pool.acquire() as conn:
+            result = await conn.execute("DELETE FROM tags WHERE id = $1", tag_id)
+            return result.endswith("1")
+
+    async def get_prompt_tag_ids(self, prompt_id: int) -> list[int]:
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT tag_id FROM prompt_tags WHERE prompt_id = $1 ORDER BY tag_id",
+                prompt_id,
+            )
+            return [int(r["tag_id"]) for r in rows]
+
+    async def set_prompt_tags(self, prompt_id: int, tag_ids: list[int]) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute("DELETE FROM prompt_tags WHERE prompt_id = $1", prompt_id)
+            for tag_id in tag_ids:
+                await conn.execute(
+                    "INSERT INTO prompt_tags (prompt_id, tag_id) VALUES ($1, $2)",
+                    prompt_id,
+                    tag_id,
+                )
+
+    async def list_prompts_with_tag(self, tag_id: int, active_only: bool = True) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            if active_only:
+                return await conn.fetch(
+                    """
+                    SELECT p.* FROM prompts p
+                    INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                    WHERE pt.tag_id = $1 AND p.is_active = TRUE
+                    ORDER BY p.id DESC
+                    """,
+                    tag_id,
+                )
+            return await conn.fetch(
+                """
+                SELECT p.* FROM prompts p
+                INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                WHERE pt.tag_id = $1
+                ORDER BY p.id DESC
+                """,
+                tag_id,
+            )
+
+    MAIN_MENU_TAG_NAME = "Main Menu"
+
+    async def list_prompts_main_menu(self, active_only: bool = True) -> list[asyncpg.Record]:
+        async with self.pool.acquire() as conn:
+            tag = await conn.fetchrow("SELECT id FROM tags WHERE name = $1", self.MAIN_MENU_TAG_NAME)
+            if not tag:
+                return []
+            tag_id = int(tag["id"])
+            if active_only:
+                return await conn.fetch(
+                    """
+                    SELECT p.* FROM prompts p
+                    INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                    WHERE pt.tag_id = $1 AND p.is_active = TRUE
+                    ORDER BY p.id DESC
+                    """,
+                    tag_id,
+                )
+            return await conn.fetch(
+                """
+                SELECT p.* FROM prompts p
+                INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                WHERE pt.tag_id = $1
+                ORDER BY p.id DESC
+                """,
+                tag_id,
             )
 
     async def get_state_value(self, key: str) -> Optional[str]:

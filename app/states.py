@@ -26,6 +26,8 @@ class AdminStates(StatesGroup):
     waiting_promo_code = State()
     waiting_promo_credits = State()
     waiting_promo_max_uses = State()
+    waiting_tag_name = State()
+    waiting_tag_edit_name = State()
 
 
 class GenerateStates(StatesGroup):

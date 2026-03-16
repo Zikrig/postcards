@@ -15,6 +15,8 @@ from app.keyboards import (
     build_prompt_edit_menu,
     build_prompt_edit_variable_actions_menu,
     build_prompt_edit_variables_menu,
+    build_prompts_by_tag_menu,
+    build_tags_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -59,11 +61,52 @@ class RouterCtx:
         return parts[1].strip()
 
     async def show_prompt_buttons(self, message: Message) -> None:
-        prompts = await self.repo.list_prompts(active_only=True)
-        if not prompts:
+        main_prompts = await self.repo.list_prompts_main_menu(active_only=True)
+        all_active = await self.repo.list_prompts(active_only=True)
+        if not all_active:
             await message.answer("No prompts yet. Please wait for admin to add them.")
             return
-        await message.answer("Select a prompt:", reply_markup=build_main_menu(prompts))
+        await message.answer("Select a prompt or Generate:", reply_markup=build_main_menu(main_prompts))
+
+    async def show_tags_menu(self, message: Message) -> None:
+        tags = await self.repo.list_tags()
+        if not tags:
+            await message.answer("No tags yet.", reply_markup=build_tags_menu([]))
+            return
+        await message.answer("Choose a category:", reply_markup=build_tags_menu(tags))
+
+    async def show_prompts_for_tag(self, message: Message, tag_id: int) -> None:
+        prompts = await self.repo.list_prompts_with_tag(tag_id, active_only=True)
+        tag = await self.repo.get_tag_by_id(tag_id)
+        name = tag["name"] if tag else str(tag_id)
+        if not prompts:
+            await message.answer(f"No prompts in «{name}».", reply_markup=build_prompts_by_tag_menu([], tag_id))
+            return
+        await message.answer(f"Prompts in «{name}»:", reply_markup=build_prompts_by_tag_menu(prompts, tag_id))
+
+    async def edit_to_main_menu(self, message: Message) -> None:
+        main_prompts = await self.repo.list_prompts_main_menu(active_only=True)
+        try:
+            await message.edit_text("Select a prompt or Generate:", reply_markup=build_main_menu(main_prompts))
+        except TelegramBadRequest:
+            await self.show_prompt_buttons(message)
+
+    async def edit_to_tags_menu(self, message: Message) -> None:
+        tags = await self.repo.list_tags()
+        try:
+            await message.edit_text("Choose a category:", reply_markup=build_tags_menu(tags))
+        except TelegramBadRequest:
+            await self.show_tags_menu(message)
+
+    async def edit_to_prompts_for_tag(self, message: Message, tag_id: int) -> None:
+        prompts = await self.repo.list_prompts_with_tag(tag_id, active_only=True)
+        tag = await self.repo.get_tag_by_id(tag_id)
+        name = tag["name"] if tag else str(tag_id)
+        text = f"Prompts in «{name}»:" if prompts else f"No prompts in «{name}»."
+        try:
+            await message.edit_text(text, reply_markup=build_prompts_by_tag_menu(prompts, tag_id))
+        except TelegramBadRequest:
+            await self.show_prompts_for_tag(message, tag_id)
 
     def get_variable_config(
         self,

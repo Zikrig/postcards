@@ -7,11 +7,33 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from .utils import btn_label, get_feach_option_enabled, variable_token
 
 
-def build_main_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    """Main menu: prompts with 'Main Menu' tag first, then Generate button."""
+    buttons = [
+        [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
+        for p in main_menu_prompts
+    ]
+    buttons.append([InlineKeyboardButton(text="Generate", callback_data="menu:tags")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_tags_menu(tags: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    """List of tags for Generate submenu; Back returns to main menu."""
+    buttons = [
+        [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"menu:tag:{t['id']}")]
+        for t in tags
+    ]
+    buttons.append([InlineKeyboardButton(text="◀ Back", callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_prompts_by_tag_menu(prompts: list[asyncpg.Record], tag_id: int) -> InlineKeyboardMarkup:
+    """Prompts for one tag; Back returns to tags list."""
     buttons = [
         [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
         for p in prompts
     ]
+    buttons.append([InlineKeyboardButton(text="◀ Back", callback_data="menu:tags")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -19,7 +41,28 @@ def build_admin_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Prompt work", callback_data="admin:prompt_work")],
+            [InlineKeyboardButton(text="Tags", callback_data="admin:tags")],
             [InlineKeyboardButton(text="Promo codes", callback_data="admin:promo_menu")],
+        ]
+    )
+
+
+def build_admin_tags_menu(tags: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"admin:tag:item:{t['id']}")]
+        for t in tags
+    ]
+    rows.append([InlineKeyboardButton(text="Add tag", callback_data="admin:tag:add")])
+    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:tags:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_admin_tag_item_menu(tag_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Rename", callback_data=f"admin:tag:edit:{tag_id}")],
+            [InlineKeyboardButton(text="Delete", callback_data=f"admin:tag:delete:{tag_id}")],
+            [InlineKeyboardButton(text="Back", callback_data="admin:tags")],
         ]
     )
 
@@ -132,6 +175,7 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
             [InlineKeyboardButton(text="Edit variables", callback_data=f"admin:editpart:variables:{prompt_id}")],
+            [InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")],
             [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
@@ -139,6 +183,34 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
         ]
     )
+
+
+def build_prompt_edit_tags_menu(
+    prompt_id: int,
+    assigned_tags: list[asyncpg.Record],
+    all_tags: list[asyncpg.Record],
+) -> InlineKeyboardMarkup:
+    """Assigned tags + Add tag (if there are tags not yet assigned) + Back."""
+    assigned_ids = {int(t["id"]) for t in assigned_tags}
+    rows = [
+        [InlineKeyboardButton(text=f"✓ {btn_label(str(t['name']), 18)}", callback_data=f"admin:editpart:tag_remove:{prompt_id}:{t['id']}")]
+        for t in assigned_tags
+    ]
+    tags_to_add = [t for t in all_tags if int(t["id"]) not in assigned_ids]
+    if tags_to_add:
+        rows.append([InlineKeyboardButton(text="Add tag", callback_data=f"admin:editpart:tag_add:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Back to edit", callback_data=f"admin:edit:{prompt_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_prompt_assign_tag_menu(prompt_id: int, tags_to_choose: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+    """Choose a tag to assign to prompt; Back to tags list for this prompt."""
+    rows = [
+        [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"admin:editpart:tag_assign:{prompt_id}:{t['id']}")]
+        for t in tags_to_choose
+    ]
+    rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:editpart:tags:{prompt_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, str]]) -> InlineKeyboardMarkup:

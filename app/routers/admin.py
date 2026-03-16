@@ -14,8 +14,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from app.keyboards import (
+    build_admin_menu,
+    build_admin_tag_item_menu,
+    build_admin_tags_menu,
     build_feature_config_menu,
+    build_prompt_assign_tag_menu,
     build_prompt_edit_menu,
+    build_prompt_edit_tags_menu,
     build_prompt_edit_variable_actions_menu,
     build_prompt_edit_variables_menu,
     build_prompt_feach_menu,
@@ -73,6 +78,256 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             )
         else:
             await callback.message.answer("List of prompts:", reply_markup=build_prompt_list_menu(prompts))
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:tags")
+    async def admin_tags_menu(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        tags = await ctx.repo.list_tags()
+        await callback.message.answer("Tags:", reply_markup=build_admin_tags_menu(tags))
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:tags:back")
+    async def admin_tags_back(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            await callback.message.edit_text("Admin panel:", reply_markup=build_admin_menu())
+        except TelegramBadRequest:
+            await callback.message.answer("Admin panel:", reply_markup=build_admin_menu())
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:tag:add")
+    async def admin_tag_add(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.clear()
+        await state.set_state(AdminStates.waiting_tag_name)
+        await callback.message.answer("Enter tag name:")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_tag_name)
+    async def admin_tag_name_entered(message: Message, state: FSMContext) -> None:
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user or not user["is_admin"]:
+            return
+        name = (message.text or "").strip()
+        if not name:
+            await message.answer("Tag name cannot be empty. Enter tag name:")
+            return
+        await ctx.repo.create_tag(name)
+        await state.clear()
+        tags = await ctx.repo.list_tags()
+        await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags))
+
+    @router.callback_query(F.data.startswith("admin:tag:item:"))
+    async def admin_tag_item(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            tag_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid tag", show_alert=True)
+            return
+        tag = await ctx.repo.get_tag_by_id(tag_id)
+        if not tag:
+            await callback.answer("Tag not found", show_alert=True)
+            return
+        await callback.message.answer(f"Tag: {tag['name']}", reply_markup=build_admin_tag_item_menu(tag_id))
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:tag:edit:"))
+    async def admin_tag_edit(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            tag_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid tag", show_alert=True)
+            return
+        await state.update_data(editing_tag_id=tag_id)
+        await state.set_state(AdminStates.waiting_tag_edit_name)
+        await callback.message.answer("Enter new tag name:")
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_tag_edit_name)
+    async def admin_tag_edit_name_entered(message: Message, state: FSMContext) -> None:
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user or not user["is_admin"]:
+            return
+        data = await state.get_data()
+        tag_id = data.get("editing_tag_id")
+        if tag_id is None:
+            await state.clear()
+            return
+        name = (message.text or "").strip()
+        if not name:
+            await message.answer("Tag name cannot be empty. Enter new tag name:")
+            return
+        await ctx.repo.update_tag(int(tag_id), name)
+        await state.clear()
+        tags = await ctx.repo.list_tags()
+        await message.answer("Tag renamed. Tags:", reply_markup=build_admin_tags_menu(tags))
+
+    @router.callback_query(F.data.startswith("admin:tag:delete:"))
+    async def admin_tag_delete(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            tag_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid tag", show_alert=True)
+            return
+        await ctx.repo.delete_tag(tag_id)
+        tags = await ctx.repo.list_tags()
+        try:
+            await callback.message.edit_text("Tags:", reply_markup=build_admin_tags_menu(tags))
+        except TelegramBadRequest:
+            await callback.message.answer("Tags:", reply_markup=build_admin_tags_menu(tags))
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:tags:"))
+    async def admin_editpart_tags(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
+        all_tags = await ctx.repo.list_tags()
+        assigned = [t for t in all_tags if int(t["id"]) in tag_ids]
+        await callback.message.answer(
+            "Tags for this prompt. Click a tag to remove; use Add tag to assign.",
+            reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:tag_add:"))
+    async def admin_editpart_tag_add(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
+        all_tags = await ctx.repo.list_tags()
+        to_choose = [t for t in all_tags if int(t["id"]) not in tag_ids]
+        if not to_choose:
+            await callback.answer("All tags already assigned.", show_alert=True)
+            return
+        await callback.message.answer(
+            "Choose a tag to assign:",
+            reply_markup=build_prompt_assign_tag_menu(prompt_id, to_choose),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:tag_assign:"))
+    async def admin_editpart_tag_assign(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[-2])
+            tag_id = int(parts[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
+        if tag_id not in tag_ids:
+            tag_ids.append(tag_id)
+            await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
+        all_tags = await ctx.repo.list_tags()
+        assigned = [t for t in all_tags if int(t["id"]) in await ctx.repo.get_prompt_tag_ids(prompt_id)]
+        try:
+            await callback.message.edit_text(
+                "Tags for this prompt.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Tags for this prompt.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+            )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:tag_remove:"))
+    async def admin_editpart_tag_remove(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[-2])
+            tag_id = int(parts[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
+        if tag_id in tag_ids:
+            tag_ids.remove(tag_id)
+            await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
+        all_tags = await ctx.repo.list_tags()
+        assigned = [t for t in all_tags if int(t["id"]) in await ctx.repo.get_prompt_tag_ids(prompt_id)]
+        try:
+            await callback.message.edit_text(
+                "Tags for this prompt.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Tags for this prompt.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+            )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:gen:start")

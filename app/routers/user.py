@@ -11,6 +11,45 @@ from .common import RouterCtx
 
 
 def register_user(router: Router, ctx: RouterCtx) -> None:
+    @router.callback_query(F.data == "menu:main")
+    async def menu_main_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        await callback.answer()
+        await state.clear()
+        await ctx.edit_to_main_menu(callback.message)
+
+    @router.callback_query(F.data == "menu:tags")
+    async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        await callback.answer()
+        await ctx.edit_to_tags_menu(callback.message)
+
+    @router.callback_query(F.data.startswith("menu:tag:"))
+    async def menu_tag_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        try:
+            tag_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid tag", show_alert=True)
+            return
+        await callback.answer()
+        await ctx.edit_to_prompts_for_tag(callback.message, tag_id)
+
     @router.callback_query(F.data.startswith("prompt:select:"))
     async def prompt_pick_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
