@@ -452,8 +452,7 @@ class Repo:
             
             desc = source.get("description") or source.get("title") or target_title
             # Log source prompt important fields for debugging cloning behaviour
-            import logging
-            logging.getLogger(__name__).info(
+            logger.info(
                 "clone_prompt: source_id=%s title=%r ref_id=%r examples=%r is_public=%r is_active=%r",
                 source.get("id"),
                 source.get("title"),
@@ -469,49 +468,68 @@ class Repo:
             else:
                 examples_json = json.dumps(examples_raw or [])
 
-            row = await conn.fetchrow(
-                """
-                INSERT INTO prompts (
-                    title,
-                    template,
-                    variable_descriptions,
-                    reference_photo_file_id,
-                    created_by,
-                    is_active,
-                    feach_data,
-                    owner_tg_id,
-                    is_public,
-                    source_prompt_id,
-                    description,
-                    example_file_ids
-                )
-                VALUES (
-                    $1,
-                    $2,
-                    $3::jsonb,
-                    $4,
-                    $5,
-                    TRUE,
-                    $6::jsonb,
-                    NULL,
-                    TRUE,
-                    $7,
-                    $8,
-                    $9::jsonb
-                )
-                RETURNING id
-                """,
-                target_title,
-                source["template"],
-                source["variable_descriptions"],
-                source["reference_photo_file_id"],
-                source["created_by"],
-                source["feach_data"],
-                source_id,
-                desc,
-                examples_json,
-            )
-            return int(row["id"])
+            # Try to insert with unique title; if conflict, add numeric suffixes
+            base_title = target_title
+            last_exc: Exception | None = None
+            for i in range(1, 6):
+                if i == 1:
+                    title_try = base_title
+                else:
+                    title_try = f"{base_title} ({i})"
+                try:
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO prompts (
+                            title,
+                            template,
+                            variable_descriptions,
+                            reference_photo_file_id,
+                            created_by,
+                            is_active,
+                            feach_data,
+                            owner_tg_id,
+                            is_public,
+                            source_prompt_id,
+                            description,
+                            example_file_ids
+                        )
+                        VALUES (
+                            $1,
+                            $2,
+                            $3::jsonb,
+                            $4,
+                            $5,
+                            TRUE,
+                            $6::jsonb,
+                            NULL,
+                            TRUE,
+                            $7,
+                            $8,
+                            $9::jsonb
+                        )
+                        RETURNING id
+                        """,
+                        title_try,
+                        source["template"],
+                        source["variable_descriptions"],
+                        source["reference_photo_file_id"],
+                        source["created_by"],
+                        source["feach_data"],
+                        source_id,
+                        desc,
+                        examples_json,
+                    )
+                    logger.info("clone_prompt: created clone id=%s with title=%r", row["id"], title_try)
+                    return int(row["id"])
+                except asyncpg.UniqueViolationError as e:  # type: ignore[attr-defined]
+                    # Title already exists, try next suffix
+                    logger.info("clone_prompt: title %r already exists, trying another suffix", title_try)
+                    last_exc = e
+                    continue
+            # If we are here, all attempts failed
+            if last_exc:
+                raise last_exc
+            raise RuntimeError("clone_prompt: failed to insert clone for unknown reason")
 
     async def list_tags(self) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:

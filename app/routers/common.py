@@ -325,7 +325,8 @@ class RouterCtx:
             examples,
             is_admin_view,
         )
-        reference_text = "set" if ref_id else "not set"
+        has_ref_or_example = bool(ref_id) or bool(examples)
+        reference_text = "set" if has_ref_or_example else "not set"
         back_cb = "admin:pw:list"
         # Если явно передали, уважаем
         if is_admin_view is False:
