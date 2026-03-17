@@ -417,6 +417,7 @@ def build_prompt_edit_tags_menu(
     assigned_ids: set[int],
     page: int = 0,
     total: int = 0,
+    back_callback: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     """All tags with 🟢 (assigned) / 🔴 (not assigned); click toggles; pagination 20 per page."""
     rows: list[list[InlineKeyboardButton]] = []
@@ -447,9 +448,9 @@ def build_prompt_edit_tags_menu(
     # Main Menu сверху, затем остальные теги в исходном порядке
     rows.extend(main_menu_rows)
     rows.extend(other_rows)
-    rows.extend(
-        _pagination_buttons(page, total, f"admin:editpart:tags:{prompt_id}", f"admin:pw:item:{prompt_id}")
-    )
+    base_cb = f"admin:editpart:tags:{prompt_id}"
+    back_cb = back_callback or f"admin:pw:item:{prompt_id}"
+    rows.extend(_pagination_buttons(page, total, base_cb, back_cb))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

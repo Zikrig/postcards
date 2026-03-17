@@ -247,9 +247,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid prompt", show_alert=True)
@@ -260,18 +257,47 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         except (ValueError, IndexError):
             await callback.answer("Invalid prompt", show_alert=True)
             return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
         tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
         assigned_ids = set(tag_ids)
-        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+        if is_admin:
+            tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+            back_cb = f"admin:pw:item:{prompt_id}"
+        else:
+            # Для обычных пользователей показываем только community-теги
+            tags, total = await ctx.repo.list_community_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+            back_cb = f"menu:my_prompt_item:{prompt_id}"
         try:
             await callback.message.edit_text(
                 "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
+                reply_markup=build_prompt_edit_tags_menu(
+                    prompt_id,
+                    tags,
+                    assigned_ids,
+                    page=page,
+                    total=total,
+                    back_callback=back_cb,
+                ),
             )
         except TelegramBadRequest:
             await callback.message.answer(
                 "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
+                reply_markup=build_prompt_edit_tags_menu(
+                    prompt_id,
+                    tags,
+                    assigned_ids,
+                    page=page,
+                    total=total,
+                    back_callback=back_cb,
+                ),
             )
         await callback.answer()
 
@@ -280,9 +306,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 6:
             await callback.answer("Invalid", show_alert=True)
@@ -294,6 +317,15 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         except (ValueError, IndexError):
             await callback.answer("Invalid", show_alert=True)
             return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
         tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
         if tag_id in tag_ids:
             tag_ids.remove(tag_id)
@@ -301,11 +333,23 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             tag_ids.append(tag_id)
         await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
         assigned_ids = set(await ctx.repo.get_prompt_tag_ids(prompt_id))
-        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+        if is_admin:
+            tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+            back_cb = f"admin:pw:item:{prompt_id}"
+        else:
+            tags, total = await ctx.repo.list_community_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+            back_cb = f"menu:my_prompt_item:{prompt_id}"
         try:
             await callback.message.edit_text(
                 "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
+                reply_markup=build_prompt_edit_tags_menu(
+                    prompt_id,
+                    tags,
+                    assigned_ids,
+                    page=page,
+                    total=total,
+                    back_callback=back_cb,
+                ),
             )
         except TelegramBadRequest:
             pass
