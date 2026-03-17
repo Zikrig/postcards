@@ -28,7 +28,7 @@ def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMa
     buttons = [
         [
             InlineKeyboardButton(
-                text=btn_label(f"📄 {p['title']}", 20),
+                text=btn_label(p['title'], 20),
                 callback_data=f"prompt:select:{p['id']}",
             )
         ]
@@ -95,7 +95,7 @@ def build_prompts_by_tag_menu(
     buttons = [
         [
             InlineKeyboardButton(
-                text=btn_label(f"📄 {p['title']}", 20),
+                text=btn_label(p['title'], 20),
                 callback_data=f"prompt:select:{p['id']}",
             )
         ]

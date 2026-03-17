@@ -105,26 +105,31 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
-        await callback.message.edit_text(
-            desc,
-            reply_markup=build_prompt_feach_menu(
-                prompt_id,
-                feach_data or {},
-                bool(prompt.get("is_active", True)),
-                owner_tg_id=prompt.get("owner_tg_id"),
-                is_public=prompt.get("is_public", False),
-                is_admin_view=False,
-                template=template,
-            ),
-        )
         example_ids = prompt.get("example_file_ids") or []
         if isinstance(example_ids, list):
-            for fid in example_ids[:3]:
-                if fid:
-                    try:
-                        await callback.message.answer_photo(photo=str(fid))
-                    except Exception:
-                        pass
+            example_ids = [str(f) for f in example_ids[:3] if f]
+        markup = build_prompt_feach_menu(
+            prompt_id,
+            feach_data or {},
+            bool(prompt.get("is_active", True)),
+            owner_tg_id=prompt.get("owner_tg_id"),
+            is_public=prompt.get("is_public", False),
+            is_admin_view=False,
+            template=template,
+        )
+        if example_ids:
+            await callback.message.answer_photo(
+                photo=example_ids[0],
+                caption=desc,
+                reply_markup=markup,
+            )
+            for fid in example_ids[1:]:
+                try:
+                    await callback.message.answer_photo(photo=fid)
+                except Exception:
+                    pass
+        else:
+            await callback.message.edit_text(desc, reply_markup=markup)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("menu:community_prompt:"))
@@ -152,28 +157,33 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
         is_admin = bool(user.get("is_admin"))
-        await callback.message.edit_text(
-            desc,
-            reply_markup=build_prompt_feach_menu(
-                prompt_id,
-                feach_data or {},
-                bool(prompt.get("is_active", True)),
-                owner_tg_id=prompt.get("owner_tg_id"),
-                is_public=prompt.get("is_public", False),
-                is_admin_view=True,
-                template=template,
-                back_callback="menu:community_tags:0",
-                show_clone=is_admin,
-            ),
-        )
         example_ids = prompt.get("example_file_ids") or []
         if isinstance(example_ids, list):
-            for fid in example_ids[:3]:
-                if fid:
-                    try:
-                        await callback.message.answer_photo(photo=str(fid))
-                    except Exception:
-                        pass
+            example_ids = [str(f) for f in example_ids[:3] if f]
+        markup = build_prompt_feach_menu(
+            prompt_id,
+            feach_data or {},
+            bool(prompt.get("is_active", True)),
+            owner_tg_id=prompt.get("owner_tg_id"),
+            is_public=prompt.get("is_public", False),
+            is_admin_view=True,
+            template=template,
+            back_callback="menu:community_tags:0",
+            show_clone=is_admin,
+        )
+        if example_ids:
+            await callback.message.answer_photo(
+                photo=example_ids[0],
+                caption=desc,
+                reply_markup=markup,
+            )
+            for fid in example_ids[1:]:
+                try:
+                    await callback.message.answer_photo(photo=fid)
+                except Exception:
+                    pass
+        else:
+            await callback.message.edit_text(desc, reply_markup=markup)
         await callback.answer()
 
     @router.callback_query(F.data == "menu:create_prompt")
@@ -327,24 +337,26 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or str(prompt.get("title", ""))
-        try:
-            await callback.message.edit_text(
-                desc,
-                reply_markup=build_prompt_preview_menu(prompt_id, back_callback="menu:main"),
-            )
-        except Exception:
-            await callback.message.answer(
-                desc,
-                reply_markup=build_prompt_preview_menu(prompt_id, back_callback="menu:main"),
-            )
         example_ids = prompt.get("example_file_ids") or []
         if isinstance(example_ids, list):
-            for fid in example_ids[:3]:
-                if fid:
-                    try:
-                        await callback.message.answer_photo(photo=str(fid))
-                    except Exception:
-                        pass
+            example_ids = [str(f) for f in example_ids[:3] if f]
+        markup = build_prompt_preview_menu(prompt_id, back_callback="menu:main")
+        if example_ids:
+            await callback.message.answer_photo(
+                photo=example_ids[0],
+                caption=desc,
+                reply_markup=markup,
+            )
+            for fid in example_ids[1:]:
+                try:
+                    await callback.message.answer_photo(photo=fid)
+                except Exception:
+                    pass
+        else:
+            try:
+                await callback.message.edit_text(desc, reply_markup=markup)
+            except Exception:
+                await callback.message.answer(desc, reply_markup=markup)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("prompt:generate:"))
