@@ -2638,17 +2638,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         # Refresh menu
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
-        feach_data = ensure_dict(prompt.get("feach_data") or {})
-        template = str(prompt.get("template") or "")
-        await callback.message.edit_reply_markup(
-            reply_markup=build_prompt_feach_menu(
-                prompt_id,
-                feach_data,
-                prompt["is_active"],
-                owner_tg_id=prompt.get("owner_tg_id"),
-                is_public=prompt.get("is_public", False),
-                is_admin_view=is_admin and not is_owner,
-                template=template,
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            template = str(prompt.get("template") or "")
+            await callback.message.edit_reply_markup(
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    prompt["is_active"],
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=is_admin and not is_owner,
+                    template=template,
+                )
             )
-        )
 
