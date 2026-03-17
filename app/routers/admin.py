@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import random
-from typing import Any, Optional
+from typing import Any, Optional, List
 
 import asyncpg
 from aiogram import F, Router
@@ -253,17 +253,32 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         await callback.answer()
 
     @router.message(AdminStates.waiting_greeting_message)
-    async def admin_greeting_message_entered(message: Message, state: FSMContext) -> None:
+    async def admin_greeting_message_entered(message: Message, state: FSMContext, album: Optional[List[Message]] = None) -> None:
         """
         Save whatever admin sent (text + media file_ids) as the new greeting payload.
         """
         user = await ctx.repo.get_user(message.from_user.id)
         if not user or not user["is_admin"]:
             return
+
         text = (message.text or message.caption or "").strip()
         photos = [p.file_id for p in (message.photo or [])]
         voice_id = message.voice.file_id if message.voice else None
         doc_id = message.document.file_id if message.document else None
+
+        # If it's an album, collect all photos
+        if album:
+            photos = []
+            for msg in album:
+                if msg.photo:
+                    photos.append(msg.photo[-1].file_id)
+                # Text should come from the first message in the album (common practice in TG)
+                if not text and (msg.text or msg.caption):
+                    text = (msg.text or msg.caption or "").strip()
+                if not voice_id and msg.voice:
+                    voice_id = msg.voice.file_id
+                if not doc_id and msg.document:
+                    doc_id = msg.document.file_id
 
         payload: dict[str, Any] = {
             "text": text,

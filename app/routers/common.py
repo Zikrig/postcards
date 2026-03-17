@@ -1,12 +1,47 @@
 """Shared context and helpers for routers (ensure_user, run_generation, etc.)."""
 import logging
-from typing import Any, Optional
+import asyncio
+from typing import Any, Optional, Dict, List, Union
 
 import asyncpg
-from aiogram import Bot
+from aiogram import Bot, BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject
+
+
+class AlbumMiddleware(BaseMiddleware):
+    """
+    Middleware to group messages with the same media_group_id.
+    It waits for `latency` seconds for messages of the same group to arrive.
+    The collected list of messages is placed in `data['album']`.
+    """
+    def __init__(self, latency: float = 0.5):
+        self.latency = latency
+        self.albums: Dict[str, List[Message]] = {}
+        super().__init__()
+
+    async def __call__(
+        self,
+        handler: Any,
+        event: TelegramObject,
+        data: Dict[str, Any],
+    ) -> Any:
+        if not isinstance(event, Message) or not event.media_group_id:
+            return await handler(event, data)
+
+        album_id = event.media_group_id
+        if album_id not in self.albums:
+            # First message of a media group
+            self.albums[album_id] = [event]
+            await asyncio.sleep(self.latency)
+            # After waiting, we pass the album to the handler
+            data["album"] = self.albums.pop(album_id, [])
+            return await handler(event, data)
+
+        # Subsequent messages just append to the list
+        self.albums[album_id].append(event)
+        return None
 
 from app.config import Settings
 from app.evo_client import EvoClient

@@ -34,13 +34,44 @@ def register_auth(router: Router, ctx: RouterCtx) -> None:
             await ctx.repo.set_user_authorized(user["tg_id"], True)
 
         balance = await ctx.repo.get_user_balance(user["tg_id"])
-        await message.answer(
-            f"{promo_block}"
-            "Welcome!\n"
-            "Choose one of the prompt buttons below.\n"
-            "For each prompt, I will ask for required values and then generate an image.\n"
-            f"Your balance: {balance}"
-        )
+        greeting = await ctx.repo.get_greeting()
+
+        if greeting:
+            text = (greeting.get("text") or "").strip()
+            if promo_block:
+                text = f"{promo_block}\n{text}"
+            
+            # Append balance if not present in the custom greeting
+            if "balance" not in text.lower():
+                text += f"\n\nYour balance: {balance}"
+            
+            photos = greeting.get("photos")
+            voice_id = greeting.get("voice_id")
+            document_id = greeting.get("document_id")
+
+            if photos:
+                if len(photos) > 1:
+                    from aiogram.types import InputMediaPhoto
+                    media = [InputMediaPhoto(media=p) for p in photos]
+                    # The caption should go to the first photo in the media group
+                    media[0].caption = text
+                    await message.answer_media_group(media=media)
+                else:
+                    await message.answer_photo(photo=photos[0], caption=text)
+            elif voice_id:
+                await message.answer_voice(voice=voice_id, caption=text)
+            elif document_id:
+                await message.answer_document(document=document_id, caption=text)
+            else:
+                await message.answer(text)
+        else:
+            await message.answer(
+                f"{promo_block}"
+                "Welcome!\n"
+                "Choose one of the prompt buttons below.\n"
+                "For each prompt, I will ask for required values and then generate an image.\n"
+                f"Your balance: {balance}"
+            )
         await ctx.show_prompt_buttons(message)
         return
 

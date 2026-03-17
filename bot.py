@@ -36,6 +36,9 @@ async def main() -> None:
         bot = Bot(token=settings.bot_token)
         dp = Dispatcher()
 
+        from app.routers.common import AlbumMiddleware
+        dp.message.middleware(AlbumMiddleware())
+
         @dp.update.outer_middleware()
         async def logging_middleware(handler, event, data):
             try:
