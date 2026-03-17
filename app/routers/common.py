@@ -17,6 +17,8 @@ from app.keyboards import (
     build_prompt_edit_variables_menu,
     build_prompts_by_tag_menu,
     build_tags_menu,
+    build_user_prompts_menu,
+    build_admin_users_with_prompts_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -127,6 +129,46 @@ class RouterCtx:
             )
         except TelegramBadRequest:
             await self.show_prompts_for_tag(message, tag_id, page)
+
+    async def show_user_prompts(self, message: Message, owner_tg_id: int, page: int = 0, is_admin_view: bool = False) -> None:
+        prompts, total = await self.repo.list_user_prompts_paginated(owner_tg_id, page=page, per_page=self.repo.PAGE_SIZE)
+        text = "Your prompts:" if not is_admin_view else f"Prompts by user {owner_tg_id}:"
+        if not prompts:
+            text = "You have no prompts yet." if not is_admin_view else f"User {owner_tg_id} has no prompts."
+        await message.answer(
+            text,
+            reply_markup=build_user_prompts_menu(prompts, page=page, total=total, is_admin_view=is_admin_view, owner_tg_id=owner_tg_id)
+        )
+
+    async def edit_to_user_prompts(self, message: Message, owner_tg_id: int, page: int = 0, is_admin_view: bool = False) -> None:
+        prompts, total = await self.repo.list_user_prompts_paginated(owner_tg_id, page=page, per_page=self.repo.PAGE_SIZE)
+        text = "Your prompts:" if not is_admin_view else f"Prompts by user {owner_tg_id}:"
+        if not prompts:
+            text = "You have no prompts yet." if not is_admin_view else f"User {owner_tg_id} has no prompts."
+        try:
+            await message.edit_text(
+                text,
+                reply_markup=build_user_prompts_menu(prompts, page=page, total=total, is_admin_view=is_admin_view, owner_tg_id=owner_tg_id)
+            )
+        except TelegramBadRequest:
+            await self.show_user_prompts(message, owner_tg_id, page, is_admin_view)
+
+    async def show_admin_users_list(self, message: Message, page: int = 0) -> None:
+        users, total = await self.repo.list_users_with_prompts_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        await message.answer(
+            "Users with prompts:",
+            reply_markup=build_admin_users_with_prompts_menu(users, page=page, total=total)
+        )
+
+    async def edit_to_admin_users_list(self, message: Message, page: int = 0) -> None:
+        users, total = await self.repo.list_users_with_prompts_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        try:
+            await message.edit_text(
+                "Users with prompts:",
+                reply_markup=build_admin_users_with_prompts_menu(users, page=page, total=total)
+            )
+        except TelegramBadRequest:
+            await self.show_admin_users_list(message, page)
 
     def get_variable_config(
         self,
@@ -371,7 +413,7 @@ class RouterCtx:
                 reply_markup=self.build_text_options_keyboard(options, allow_custom),
             )
 
-    async def run_generation(self, message: Message, state: FSMContext) -> None:
+    async def run_generation(self, message: Message, state: FSMContext, cost: int = 1) -> None:
         data = await state.get_data()
         user_tg_id = int(
             data.get("request_user_id")
@@ -380,11 +422,11 @@ class RouterCtx:
         if not user_tg_id:
             await message.answer("Cannot detect user account for billing.")
             return
-        new_balance = await self.repo.consume_generation_token(user_tg_id)
+        new_balance = await self.repo.consume_tokens(user_tg_id, cost)
         if new_balance is None:
             balance = await self.repo.get_user_balance(user_tg_id)
             await message.answer(
-                "Not enough balance for generation.\n"
+                f"Not enough balance for generation ({cost} tokens needed).\n"
                 f"Your balance: {balance}\n"
                 "Apply a promo code via your start link."
             )

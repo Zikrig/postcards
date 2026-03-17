@@ -112,15 +112,25 @@ class Repo:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS prompt_tags (
-                    prompt_id INTEGER NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
-                    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                    prompt_id INTEGER NOT NULL REFERENCES prompts (id) ON DELETE CASCADE,
+                    tag_id INTEGER NOT NULL REFERENCES tags (id) ON DELETE CASCADE,
                     PRIMARY KEY (prompt_id, tag_id)
                 );
                 """
             )
-            main_menu_tag = await conn.fetchrow("SELECT id FROM tags WHERE name = $1", "Main Menu")
-            if not main_menu_tag:
-                await conn.execute("INSERT INTO tags (name) VALUES ($1)", "Main Menu")
+            await conn.execute(
+                """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS owner_tg_id BIGINT,
+                ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS source_prompt_id INTEGER;
+                """
+            )
+            # Create system tags
+            for tag_name in ["Main Menu", "Users"]:
+                tag = await conn.fetchrow("SELECT id FROM tags WHERE name = $1", tag_name)
+                if not tag:
+                    await conn.execute("INSERT INTO tags (name) VALUES ($1)", tag_name)
 
     async def upsert_user(
         self,
@@ -192,14 +202,18 @@ class Repo:
             return int(row["balance_tokens"] or 0)
 
     async def consume_generation_token(self, tg_id: int) -> Optional[int]:
+        return await self.consume_tokens(tg_id, 1)
+
+    async def consume_tokens(self, tg_id: int, amount: int) -> Optional[int]:
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 UPDATE users
-                SET balance_tokens = balance_tokens - 1
-                WHERE tg_id = $1 AND balance_tokens > 0
+                SET balance_tokens = balance_tokens - $1
+                WHERE tg_id = $2 AND balance_tokens >= $1
                 RETURNING balance_tokens
                 """,
+                amount,
                 tg_id,
             )
             if not row:
@@ -210,32 +224,62 @@ class Repo:
 
     async def list_prompts(self, active_only: bool = False) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
+            where_clauses = ["owner_tg_id IS NULL"]
             if active_only:
-                return await conn.fetch(
-                    "SELECT * FROM prompts WHERE is_active = TRUE ORDER BY id DESC"
-                )
-            return await conn.fetch("SELECT * FROM prompts ORDER BY id DESC")
+                where_clauses.append("is_active = TRUE")
+            where = " WHERE " + " AND ".join(where_clauses)
+            return await conn.fetch(f"SELECT * FROM prompts {where} ORDER BY id DESC")
 
     async def list_prompts_paginated(
         self, active_only: bool = False, page: int = 0, per_page: int = 20
     ) -> tuple[list[asyncpg.Record], int]:
         async with self.pool.acquire() as conn:
-            where = "WHERE is_active = TRUE" if active_only else ""
+            where_clauses = ["owner_tg_id IS NULL"]
+            if active_only:
+                where_clauses.append("is_active = TRUE")
+            where = " WHERE " + " AND ".join(where_clauses)
             total = await conn.fetchval(f"SELECT COUNT(*) FROM prompts {where}")
             total = int(total or 0)
             offset = max(0, page) * per_page
-            if active_only:
-                rows = await conn.fetch(
-                    "SELECT * FROM prompts WHERE is_active = TRUE ORDER BY id DESC LIMIT $1 OFFSET $2",
-                    per_page,
-                    offset,
-                )
-            else:
-                rows = await conn.fetch(
-                    "SELECT * FROM prompts ORDER BY id DESC LIMIT $1 OFFSET $2",
-                    per_page,
-                    offset,
-                )
+            rows = await conn.fetch(
+                f"SELECT * FROM prompts {where} ORDER BY id DESC LIMIT $1 OFFSET $2",
+                per_page,
+                offset,
+            )
+            return list(rows), total
+
+    async def list_user_prompts_paginated(
+        self, owner_tg_id: int, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        async with self.pool.acquire() as conn:
+            where = "WHERE owner_tg_id = $1"
+            total = await conn.fetchval(f"SELECT COUNT(*) FROM prompts {where}", owner_tg_id)
+            total = int(total or 0)
+            offset = max(0, page) * per_page
+            rows = await conn.fetch(
+                f"SELECT * FROM prompts {where} ORDER BY id DESC LIMIT $2 OFFSET $3",
+                owner_tg_id,
+                per_page,
+                offset,
+            )
+            return list(rows), total
+
+    async def list_users_with_prompts_paginated(
+        self, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        async with self.pool.acquire() as conn:
+            sql_count = "SELECT COUNT(DISTINCT owner_tg_id) FROM prompts WHERE owner_tg_id IS NOT NULL"
+            total = await conn.fetchval(sql_count)
+            total = int(total or 0)
+            offset = max(0, page) * per_page
+            sql = """
+                SELECT DISTINCT u.tg_id, u.username, u.full_name
+                FROM users u
+                INNER JOIN prompts p ON p.owner_tg_id = u.tg_id
+                ORDER BY u.tg_id
+                LIMIT $1 OFFSET $2
+            """
+            rows = await conn.fetch(sql, per_page, offset)
             return list(rows), total
 
     async def get_prompt_by_title(self, title: str) -> Optional[asyncpg.Record]:
@@ -255,12 +299,15 @@ class Repo:
         created_by: int,
         is_active: bool = True,
         feach_data: Optional[dict[str, Any]] = None,
-    ) -> None:
+        owner_tg_id: Optional[int] = None,
+        is_public: bool = False,
+    ) -> int:
         async with self.pool.acquire() as conn:
-            await conn.execute(
+            row = await conn.fetchrow(
                 """
-                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, is_active, feach_data)
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb)
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, is_active, feach_data, owner_tg_id, is_public)
+                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9)
+                RETURNING id
                 """,
                 title,
                 template,
@@ -269,6 +316,17 @@ class Repo:
                 created_by,
                 is_active,
                 json.dumps(feach_data) if feach_data is not None else None,
+                owner_tg_id,
+                is_public,
+            )
+            return int(row["id"])
+
+    async def update_prompt_public(self, prompt_id: int, is_public: bool) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE prompts SET is_public = $1 WHERE id = $2",
+                is_public,
+                prompt_id,
             )
 
     async def update_prompt(
@@ -323,6 +381,28 @@ class Repo:
                 json.dumps(example_file_ids),
                 prompt_id,
             )
+
+    async def clone_prompt(self, source_id: int, target_title: str) -> int:
+        async with self.pool.acquire() as conn:
+            source = await conn.fetchrow("SELECT * FROM prompts WHERE id = $1", source_id)
+            if not source:
+                raise ValueError("Source prompt not found")
+            
+            row = await conn.fetchrow(
+                """
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, feach_data, owner_tg_id, is_public, source_prompt_id)
+                VALUES ($1, $2, $3, $4, $5, $6, NULL, TRUE, $7)
+                RETURNING id
+                """,
+                target_title,
+                source["template"],
+                source["variable_descriptions"],
+                source["reference_photo_file_id"],
+                source["created_by"],
+                source["feach_data"],
+                source_id,
+            )
+            return int(row["id"])
 
     async def list_tags(self) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
@@ -389,54 +469,56 @@ class Repo:
 
     async def list_prompts_with_tag(self, tag_id: int, active_only: bool = True) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
+            tag = await conn.fetchrow("SELECT name FROM tags WHERE id = $1", tag_id)
+            is_users_tag = tag and tag["name"] == "Users"
+            
+            where_clauses = ["pt.tag_id = $1"]
+            if not is_users_tag:
+                where_clauses.append("p.owner_tg_id IS NULL")
             if active_only:
-                return await conn.fetch(
-                    """
-                    SELECT p.* FROM prompts p
-                    INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                    WHERE pt.tag_id = $1 AND p.is_active = TRUE
-                    ORDER BY p.id DESC
-                    """,
-                    tag_id,
-                )
-            return await conn.fetch(
-                """
+                where_clauses.append("p.is_active = TRUE")
+            
+            where = " WHERE " + " AND ".join(where_clauses)
+            sql = f"""
                 SELECT p.* FROM prompts p
                 INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                WHERE pt.tag_id = $1
+                {where}
                 ORDER BY p.id DESC
-                """,
-                tag_id,
-            )
+            """
+            return await conn.fetch(sql, tag_id)
 
     async def list_prompts_with_tag_paginated(
         self, tag_id: int, active_only: bool = True, page: int = 0, per_page: int = 20
     ) -> tuple[list[asyncpg.Record], int]:
         async with self.pool.acquire() as conn:
-            where = " AND p.is_active = TRUE" if active_only else ""
-            total = await conn.fetchval(
-                """
+            tag = await conn.fetchrow("SELECT name FROM tags WHERE id = $1", tag_id)
+            is_users_tag = tag and tag["name"] == "Users"
+
+            where_clauses = ["pt.tag_id = $1"]
+            if not is_users_tag:
+                where_clauses.append("p.owner_tg_id IS NULL")
+            if active_only:
+                where_clauses.append("p.is_active = TRUE")
+            
+            where = " WHERE " + " AND ".join(where_clauses)
+            
+            total_sql = f"""
                 SELECT COUNT(*) FROM prompts p
                 INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                WHERE pt.tag_id = $1
-                """ + where,
-                tag_id,
-            )
+                {where}
+            """
+            total = await conn.fetchval(total_sql, tag_id)
             total = int(total or 0)
+            
             offset = max(0, page) * per_page
-            rows = await conn.fetch(
-                """
+            rows_sql = f"""
                 SELECT p.* FROM prompts p
                 INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                WHERE pt.tag_id = $1
-                """ + where + """
+                {where}
                 ORDER BY p.id DESC
                 LIMIT $2 OFFSET $3
-                """,
-                tag_id,
-                per_page,
-                offset,
-            )
+            """
+            rows = await conn.fetch(rows_sql, tag_id, per_page, offset)
             return list(rows), total
 
     MAIN_MENU_TAG_NAME = "Main Menu"
@@ -447,25 +529,19 @@ class Repo:
             if not tag:
                 return []
             tag_id = int(tag["id"])
+            
+            where_clauses = ["pt.tag_id = $1", "p.owner_tg_id IS NULL"]
             if active_only:
-                return await conn.fetch(
-                    """
-                    SELECT p.* FROM prompts p
-                    INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                    WHERE pt.tag_id = $1 AND p.is_active = TRUE
-                    ORDER BY p.id DESC
-                    """,
-                    tag_id,
-                )
-            return await conn.fetch(
-                """
+                where_clauses.append("p.is_active = TRUE")
+            
+            where = " WHERE " + " AND ".join(where_clauses)
+            sql = f"""
                 SELECT p.* FROM prompts p
                 INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
-                WHERE pt.tag_id = $1
+                {where}
                 ORDER BY p.id DESC
-                """,
-                tag_id,
-            )
+            """
+            return await conn.fetch(sql, tag_id)
 
     async def get_state_value(self, key: str) -> Optional[str]:
         async with self.pool.acquire() as conn:

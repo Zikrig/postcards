@@ -527,23 +527,51 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             try:
                 await callback.message.edit_text(
                     f"Prompt: {prompt['title']}\n\nIdea: {idea}",
-                    reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                    reply_markup=build_prompt_feach_menu(
+                        prompt_id,
+                        feach_data,
+                        is_active,
+                        owner_tg_id=prompt.get("owner_tg_id"),
+                        is_public=prompt.get("is_public", False),
+                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    ),
                 )
             except TelegramBadRequest:
                 await callback.message.answer(
                     f"Prompt: {prompt['title']}\n\nIdea: {idea}",
-                    reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                    reply_markup=build_prompt_feach_menu(
+                        prompt_id,
+                        feach_data,
+                        is_active,
+                        owner_tg_id=prompt.get("owner_tg_id"),
+                        is_public=prompt.get("is_public", False),
+                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    ),
                 )
         else:
             try:
                 await callback.message.edit_text(
                     f"Prompt: {prompt['title']}",
-                    reply_markup=build_prompt_item_menu(prompt_id, is_active),
+                    reply_markup=build_prompt_feach_menu(
+                        prompt_id,
+                        feach_data,
+                        is_active,
+                        owner_tg_id=prompt.get("owner_tg_id"),
+                        is_public=prompt.get("is_public", False),
+                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    ),
                 )
             except TelegramBadRequest:
                 await callback.message.answer(
                     f"Prompt: {prompt['title']}",
-                    reply_markup=build_prompt_item_menu(prompt_id, is_active),
+                    reply_markup=build_prompt_feach_menu(
+                        prompt_id,
+                        feach_data,
+                        is_active,
+                        owner_tg_id=prompt.get("owner_tg_id"),
+                        is_public=prompt.get("is_public", False),
+                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    ),
                 )
         await callback.answer("Feature deleted")
 
@@ -675,12 +703,26 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         try:
             await callback.message.edit_text(
                 "Done. Back to prompt.",
-                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                ),
             )
         except TelegramBadRequest:
             await callback.message.answer(
                 "Done. Back to prompt.",
-                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                ),
             )
         await callback.answer()
 
@@ -832,7 +874,14 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             await callback.message.answer(
                 f"Template: {template[:300]}…" if len(template) > 300 else f"Template: {template}",
-                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, bool(prompt.get("is_active", True))),
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    bool(prompt.get("is_active", True)),
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                ),
             )
         await callback.answer()
 
@@ -910,13 +959,14 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             "?q=49&fit=crop&w=1600&h=900&dpr=2"
         )
         image_urls: list[str] = [_test_image_url]
-        admin_tg_id = callback.from_user.id
-        new_balance = await ctx.repo.consume_generation_token(admin_tg_id)
+        # Charge for test: 1 token for anyone (user testing own prompt, or admin testing)
+        user_tg_id = callback.from_user.id
+        new_balance = await ctx.repo.consume_tokens(user_tg_id, 1)
         if new_balance is None:
-            balance = await ctx.repo.get_user_balance(admin_tg_id)
-            await callback.message.answer(f"Not enough balance for test. Your balance: {balance}")
+            balance = await ctx.repo.get_user_balance(user_tg_id)
+            await callback.message.answer(f"Not enough balance for test (1 🪙 needed). Your balance: {balance}")
             return
-        progress_msg = await callback.message.answer("Test generation…")
+        progress_msg = await callback.message.answer(f"Test generation started (1 🪙 deducted, Balance: {new_balance})…")
         try:
             task_id = await ctx.evo.create_task(final_prompt, image_urls=image_urls)
 
@@ -1035,10 +1085,27 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if feach_data and feach_data.get("features"):
             await callback.message.answer(
                 f"Prompt: {prompt['title']}\nIdea: {feach_data.get('idea', '')}",
-                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                ),
             )
         else:
-            await callback.message.answer(f"Prompt: {prompt['title']}", reply_markup=build_prompt_item_menu(prompt_id, is_active))
+            await callback.message.answer(
+                f"Prompt: {prompt['title']}",
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                )
+            )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:export:"))
@@ -1397,10 +1464,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
     async def admin_prompt_item_actions(callback: CallbackQuery) -> None:
         if not callback.message:
             return
-        user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -1410,16 +1473,45 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+
+        is_admin = callback.from_user.id in config.ADMIN_IDS
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
         idea = feach_data.get("idea", "") if feach_data else ""
         text = f"Prompt: {prompt['title']}"
         if idea:
             text = f"{text}\n\nIdea: {idea}"
-        await callback.message.answer(
-            text,
-            reply_markup=build_prompt_feach_menu(prompt_id, feach_data or {}, is_active),
-        )
+        
+        # Use edit_text if possible for smoother UI
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data or {},
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=is_admin and not is_owner,
+                ),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                text,
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data or {},
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=is_admin and not is_owner,
+                ),
+            )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:pw:list_tag:"))
@@ -2420,3 +2512,101 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
     @router.message(AdminStates.waiting_prompt_examples)
     async def admin_prompt_examples_invalid(message: Message) -> None:
         await message.answer("Send 1–3 photos, then /done, or /skip to clear examples.")
+
+    @router.callback_query(F.data.startswith("admin:pw:users:"))
+    async def admin_pw_users_list(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        page = int(parts[3]) if len(parts) > 3 else 0
+        await callback.answer()
+        await ctx.edit_to_admin_users_list(callback.message, page=page)
+
+    @router.callback_query(F.data.startswith("admin:pw:user_prompts:"))
+    async def admin_pw_user_prompts(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            user_id = int(parts[3])
+            page = int(parts[4]) if len(parts) > 4 else 0
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        await callback.answer()
+        await ctx.edit_to_user_prompts(callback.message, user_id, page=page, is_admin_view=True)
+
+    @router.callback_query(F.data.startswith("admin:clone:"))
+    async def admin_clone_prompt(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        prompt_id = int(parts[2])
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        
+        new_title = f"{prompt['title']} copy"
+        try:
+            new_id = await ctx.repo.clone_prompt(prompt_id, new_title)
+            await callback.answer(f"Cloned as '{new_title}'")
+            # Open the new prompt
+            new_prompt = await ctx.repo.get_prompt_by_id(new_id)
+            if new_prompt:
+                await ctx.show_prompt_edit_actions(callback.message, new_prompt)
+        except Exception as e:
+            await callback.answer(f"Clone failed: {e}", show_alert=True)
+
+    @router.callback_query(F.data.startswith("admin:toggle_public:"))
+    async def admin_toggle_public(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        parts = (callback.data or "").split(":")
+        prompt_id = int(parts[2])
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        
+        # Admin or owner can toggle
+        is_admin = callback.from_user.id in config.ADMIN_IDS
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+        
+        new_status = not prompt.get("is_public", False)
+        await ctx.repo.update_prompt_public(prompt_id, new_status)
+        await callback.answer(f"Status changed to {'Public' if new_status else 'Private'}")
+        
+        # Refresh menu
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            await callback.message.edit_reply_markup(
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    prompt["is_active"],
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=is_admin and not is_owner,
+                )
+            )
+

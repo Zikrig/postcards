@@ -24,7 +24,7 @@ def _pagination_buttons(
 
 
 def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
-    """Main menu: prompts with 'Main Menu' tag first, then Generate button."""
+    """Main menu: prompts with 'Main Menu' tag first, then My prompts and Generate button."""
     buttons = [
         [
             InlineKeyboardButton(
@@ -34,7 +34,8 @@ def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMa
         ]
         for p in main_menu_prompts
     ]
-    buttons.append([InlineKeyboardButton(text="Generate", callback_data="menu:tags")])
+    buttons.append([InlineKeyboardButton(text="👤 My prompts", callback_data="menu:my_prompts:0")])
+    buttons.append([InlineKeyboardButton(text="✨ Generate", callback_data="menu:tags")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -47,6 +48,10 @@ def build_tags_menu(
     buttons.append(
         [InlineKeyboardButton(text="All", callback_data="menu:tag:0")]
     )
+    # User's own prompts shortcut
+    buttons.append(
+        [InlineKeyboardButton(text="Users (My prompts)", callback_data="menu:my_prompts:0")]
+    )
     # All real tags except "Main Menu" (оно только для главного меню, не как категория)
     buttons.extend(
         [
@@ -57,7 +62,7 @@ def build_tags_menu(
                 )
             ]
             for t in tags
-            if str(t.get("name") or "") != "Main Menu"
+            if str(t.get("name") or "") not in ["Main Menu", "Users"]
         ]
     )
     buttons.extend(_pagination_buttons(page, total, "menu:tags", "menu:main"))
@@ -78,6 +83,33 @@ def build_prompts_by_tag_menu(
         for p in prompts
     ]
     buttons.extend(_pagination_buttons(page, total, f"menu:tag:{tag_id}", "menu:tags"))
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_user_prompts_menu(
+    prompts: list[asyncpg.Record], page: int = 0, total: int = 0, is_admin_view: bool = False, owner_tg_id: Optional[int] = None
+) -> InlineKeyboardMarkup:
+    """User's own prompts (or admin's view of them)."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    # Button to create a new prompt (only for user view)
+    if not is_admin_view:
+        buttons.append([InlineKeyboardButton(text="➕ Create new prompt (2 🪙)", callback_data="menu:create_prompt")])
+
+    for p in prompts:
+        is_public = p.get("is_public", False)
+        emoji = "🟢" if is_public else "🔒"
+        label = f"{emoji} {p['title']}"
+        cb = f"admin:pw:item:{p['id']}"
+        buttons.append([InlineKeyboardButton(text=btn_label(label, 20), callback_data=cb)])
+    
+    if is_admin_view and owner_tg_id:
+        base_cb = f"admin:pw:user_prompts:{owner_tg_id}"
+    else:
+        base_cb = "menu:my_prompts"
+    
+    back_cb = "admin:pw:users:0" if is_admin_view else "menu:main"
+    
+    buttons.extend(_pagination_buttons(page, total, base_cb, back_cb))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -145,6 +177,7 @@ def build_admin_prompt_tags_menu(
     Tag filter for 'List of prompts' in admin:
     - First: All (all prompts)
     - Second: Main Menu (prompts with Main Menu tag)
+    - Third: Users (all user prompts)
     - Then all other tags (paginated, 20 per page).
     """
     rows: list[list[InlineKeyboardButton]] = []
@@ -152,14 +185,18 @@ def build_admin_prompt_tags_menu(
     rows.append(
         [InlineKeyboardButton(text="All", callback_data="admin:pw:list_tag:all:0")]
     )
-    # Main Menu tag (virtual here; real tag is in DB)
+    # Main Menu
     rows.append(
         [InlineKeyboardButton(text="Main Menu", callback_data="admin:pw:list_tag:main:0")]
     )
-    # Other tags (excluding Main Menu)
+    # Users (special view by user list)
+    rows.append(
+        [InlineKeyboardButton(text="Users (User list)", callback_data="admin:pw:users:0")]
+    )
+    # Other tags (excluding system ones)
     for t in tags:
         name = str(t.get("name") or "")
-        if name == "Main Menu":
+        if name in ["Main Menu", "Users"]:
             continue
         rows.append(
             [
@@ -171,6 +208,20 @@ def build_admin_prompt_tags_menu(
         )
     # Pagination over real tags; Back to Prompt work
     rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:prompt_work"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_admin_users_with_prompts_menu(
+    users: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """Admin: list of users who have prompts."""
+    rows: list[list[InlineKeyboardButton]] = []
+    for u in users:
+        label = f"{u['full_name'] or u['username'] or u['tg_id']} ({u['tg_id']})"
+        rows.append([
+            InlineKeyboardButton(text=btn_label(label, 24), callback_data=f"admin:pw:user_prompts:{u['tg_id']}:0")
+        ])
+    rows.extend(_pagination_buttons(page, total, "admin:pw:users", "admin:pw:list"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -189,7 +240,14 @@ def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyb
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_active: bool) -> InlineKeyboardMarkup:
+def build_prompt_feach_menu(
+    prompt_id: int,
+    feach_data: dict[str, Any],
+    is_active: bool,
+    owner_tg_id: Optional[int] = None,
+    is_public: bool = False,
+    is_admin_view: bool = False,
+) -> InlineKeyboardMarkup:
     features = feach_data.get("features") or {}
     rows = []
     for feat_key, feat in features.items():
@@ -200,8 +258,20 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     rows.append([
         InlineKeyboardButton(text="Generate final", callback_data=f"admin:final:{prompt_id}"),
     ])
+    rows.append([
+        InlineKeyboardButton(text="🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
+    ])
     rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+    
+    if is_admin_view:
+        rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
+
+    if owner_tg_id is not None:
+        # Toggle public/private for user prompts
+        label = "🔒 Make Private" if is_public else "🟢 Make Public"
+        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
+
     rows.append([
         InlineKeyboardButton(
             text="Deactivate" if is_active else "Activate",
@@ -211,7 +281,10 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")])
+    
+    # Navigation back based on context
+    back_cb = "admin:pw:users:0" if is_admin_view and owner_tg_id else "admin:pw:list"
+    rows.append([InlineKeyboardButton(text="Back to list", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

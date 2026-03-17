@@ -28,6 +28,7 @@ class AdminStates(StatesGroup):
     waiting_promo_max_uses = State()
     waiting_tag_name = State()
     waiting_tag_edit_name = State()
+    waiting_user_prompt_title = State()
 
 
 class GenerateStates(StatesGroup):

@@ -4,7 +4,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.states import GenerateStates
+from app.states import AdminStates, GenerateStates
 from app.utils import ensure_dict, extract_variables, variable_token
 
 from .common import RouterCtx
@@ -22,6 +22,69 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         await callback.answer()
         await state.clear()
         await ctx.edit_to_main_menu(callback.message)
+
+    @router.callback_query(F.data.startswith("menu:my_prompts:"))
+    async def my_prompts_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        page = int(parts[2]) if len(parts) > 2 else 0
+        await callback.answer()
+        await ctx.edit_to_user_prompts(callback.message, callback.from_user.id, page=page)
+
+    @router.callback_query(F.data == "menu:create_prompt")
+    async def create_prompt_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        await callback.answer()
+        await callback.message.answer("Enter a title for your new prompt (2 🪙 will be charged):")
+        from app.states import AdminStates
+        await state.set_state(AdminStates.waiting_user_prompt_title)
+
+    @router.message(AdminStates.waiting_user_prompt_title)
+    async def user_prompt_title_handler(message: Message, state: FSMContext) -> None:
+        user = await ctx.ensure_user(message)
+        if not user["is_authorized"]:
+            return
+        title = (message.text or "").strip()
+        if not title:
+            return
+        
+        # Charge 2 tokens
+        new_balance = await ctx.repo.consume_tokens(message.from_user.id, 2)
+        if new_balance is None:
+            balance = await ctx.repo.get_user_balance(message.from_user.id)
+            await message.answer(f"Not enough balance to create a prompt (2 🪙 needed).\nYour balance: {balance}")
+            await state.clear()
+            return
+
+        # Create prompt
+        prompt_id = await ctx.repo.insert_prompt(
+            title=title,
+            template="Your prompt template here",
+            variable_descriptions={},
+            reference_photo_file_id=None,
+            created_by=message.from_user.id,
+            owner_tg_id=message.from_user.id,
+            is_public=False
+        )
+        
+        # Add 'Users' tag
+        users_tag = await ctx.repo.get_tag_by_name("Users")
+        if users_tag:
+            await ctx.repo.set_prompt_tags(prompt_id, [users_tag["id"]])
+
+        await message.answer(f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance}).\nYou can now edit it in 'My prompts'.")
+        await state.clear()
+        await ctx.show_user_prompts(message, message.from_user.id)
 
     @router.callback_query(F.data.startswith("menu:tags"))
     async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
