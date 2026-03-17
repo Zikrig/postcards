@@ -1937,8 +1937,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
 
         await state.clear()
-        # Админский флоу: Back to list → admin:pw:list
-        await ctx.show_prompt_edit_actions(callback.message, prompt, is_admin_view=True)
+        # Автовыбор флоу:
+        # - владелец промпта (user или admin) → юзерский Back (My prompts)
+        # - админ, редактирующий системный или чужой промпт → админский Back (admin list)
+        is_admin_view = not is_owner
+        await ctx.show_prompt_edit_actions(callback.message, prompt, is_admin_view=is_admin_view)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:description:"))

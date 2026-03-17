@@ -327,10 +327,12 @@ class RouterCtx:
         )
         has_ref_or_example = bool(ref_id) or bool(examples)
         reference_text = "set" if has_ref_or_example else "not set"
-        back_cb = "admin:pw:list"
-        # Если явно передали, уважаем
-        if is_admin_view is False:
-            back_cb = "menu:my_prompts:0"
+        # Определяем, куда должен вести Back:
+        # - если явно передали is_admin_view, используем его
+        # - иначе: owner_tg_id есть → юзерский флоу (My prompts), иначе админский
+        if is_admin_view is None:
+            is_admin_view = prompt.get("owner_tg_id") is None
+        back_cb = "admin:pw:list" if is_admin_view else "menu:my_prompts:0"
         await message.answer(
             "Prompt edit menu:\n"
             f"Title: {prompt['title']}\n"
