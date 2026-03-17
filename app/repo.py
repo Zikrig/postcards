@@ -31,6 +31,14 @@ class Repo:
             )
             await conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value JSONB NOT NULL
+                );
+                """
+            )
+            await conn.execute(
+                """
                 ALTER TABLE users
                 ADD COLUMN IF NOT EXISTS balance_tokens INTEGER NOT NULL DEFAULT 0;
                 """
@@ -623,6 +631,33 @@ class Repo:
                     prompt_id,
                     tag_id,
                 )
+
+    async def get_greeting(self) -> Optional[dict[str, Any]]:
+        """Returns stored greeting payload or None. Structure is up to caller (text, media file_ids, etc.)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", "greeting")
+            if not row:
+                return None
+            try:
+                data = row["value"]
+                if isinstance(data, str):
+                    return json.loads(data)
+                return dict(data)
+            except Exception:
+                return None
+
+    async def set_greeting(self, payload: dict[str, Any]) -> None:
+        """Stores greeting payload under 'greeting' key."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                "greeting",
+                json.dumps(payload),
+            )
 
     async def list_prompts_with_tag(self, tag_id: int, active_only: bool = True) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:

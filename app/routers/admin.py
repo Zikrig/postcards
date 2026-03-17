@@ -222,6 +222,53 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
             await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
 
+    @router.callback_query(F.data == "admin:greeting")
+    async def admin_greeting_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        """
+        Entry point to edit bot greeting message.
+        Admin can send a new greeting with text, images and/or voice.
+        """
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.clear()
+        stored = await ctx.repo.get_greeting()
+        text_preview = (stored or {}).get("text") or "<not set>"
+        await callback.message.answer(
+            "Greeting editor.\n\n"
+            "Send a NEW greeting message.\n"
+            "It may contain text, images and/or a voice message.\n\n"
+            f"Current text preview:\n{text_preview}"
+        )
+        await state.set_state(AdminStates.waiting_greeting_message)
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_greeting_message)
+    async def admin_greeting_message_entered(message: Message, state: FSMContext) -> None:
+        """
+        Save whatever admin sent (text + media file_ids) as the new greeting payload.
+        """
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user or not user["is_admin"]:
+            return
+        text = (message.text or message.caption or "").strip()
+        photos = [p.file_id for p in (message.photo or [])]
+        voice_id = message.voice.file_id if message.voice else None
+        doc_id = message.document.file_id if message.document else None
+
+        payload: dict[str, Any] = {
+            "text": text,
+            "photos": photos,
+            "voice_id": voice_id,
+            "document_id": doc_id,
+        }
+        await ctx.repo.set_greeting(payload)
+        await state.clear()
+        await message.answer("Greeting has been updated.")
+
     @router.callback_query(F.data.startswith("admin:tag:item:"))
     async def admin_tag_item(callback: CallbackQuery) -> None:
         if not callback.message:

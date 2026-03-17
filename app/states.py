@@ -31,6 +31,7 @@ class AdminStates(StatesGroup):
     waiting_tag_edit_name = State()
     waiting_user_prompt_title = State()
     waiting_user_prompt_idea = State()
+    waiting_greeting_message = State()
 
 
 class GenerateStates(StatesGroup):
