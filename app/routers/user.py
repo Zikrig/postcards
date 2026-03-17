@@ -88,6 +88,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         """Юзерское меню «My prompts»: открыть свой промпт с полным меню (редактирование и т.д.)."""
         if not callback.message:
             return
+        logger.info("my_prompt_item_callback: data=%r, from_user_id=%s", callback.data, callback.from_user.id)
         user = await ctx.ensure_user_from_tg(callback.from_user)
         if not user["is_authorized"]:
             await callback.answer("Please use /start first.", show_alert=True)
@@ -101,7 +102,15 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
-        if prompt.get("owner_tg_id") != callback.from_user.id:
+        owner_tg_id = prompt.get("owner_tg_id")
+        logger.info(
+            "my_prompt_item_callback: prompt_id=%s, owner_tg_id=%s, user_tg_id=%s, is_admin=%s",
+            prompt_id,
+            owner_tg_id,
+            callback.from_user.id,
+            bool(user.get("is_admin")),
+        )
+        if owner_tg_id != callback.from_user.id and not user.get("is_admin"):
             await callback.answer("Not your prompt", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})

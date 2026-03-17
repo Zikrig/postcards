@@ -387,6 +387,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_feach_feature: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -403,7 +404,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_feach_feature: prompt_id=%s, feat_key=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            feat_key,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_feach_feature: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
@@ -431,6 +441,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_opt_toggle: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         parts = (callback.data or "").split(":")
         if len(parts) < 6:
             await callback.answer("Invalid", show_alert=True)
@@ -449,7 +460,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_opt_toggle: prompt_id=%s, feat_key=%s, opt_key=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            feat_key,
+            opt_key,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_opt_toggle: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
@@ -496,6 +517,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_feature_delete: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -512,7 +534,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_feature_delete: prompt_id=%s, feat_key=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            feat_key,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_feature_delete: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
@@ -592,6 +623,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_myown_toggle: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -608,7 +640,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_myown_toggle: prompt_id=%s, feat_key=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            feat_key,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_myown_toggle: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
@@ -928,6 +969,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_test_prompt: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -939,7 +981,15 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_test_prompt: prompt_id=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_test_prompt: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
 
@@ -1052,6 +1102,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
+        logging.info("admin_test_add_to_examples: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -1065,6 +1116,19 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_test_add_to_examples: prompt_id=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
+        if not (is_admin or is_owner):
+            logging.warning("admin_test_add_to_examples: no permission, answering Not allowed")
+            await callback.answer("Not allowed", show_alert=True)
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
@@ -1113,7 +1177,15 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_toggle_active: prompt_id=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
         if not (is_admin or is_owner):
+            logging.warning("admin_toggle_active: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
         new_active = not bool(prompt.get("is_active", True))
