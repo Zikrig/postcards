@@ -331,7 +331,7 @@ class Repo:
         variable_descriptions: dict[str, Any],
         reference_photo_file_id: Optional[str],
         created_by: int,
-        is_active: bool = True,
+        is_active: bool = False,
         feach_data: Optional[dict[str, Any]] = None,
         owner_tg_id: Optional[int] = None,
         is_public: bool = False,

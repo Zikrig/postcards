@@ -299,18 +299,18 @@ def build_prompt_feach_menu(
                 callback_data=f"admin:active:{prompt_id}",
             ),
         ])
+        rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
 
-    rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
-    
-    if is_admin_view:
+        if owner_tg_id is not None:
+            # Toggle public/private for user prompts
+            label = "🔒 Make Private" if is_public else "🟢 Make Public"
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
+        
+        rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
+
+    if is_admin_view and not is_draft: # Clone also only if not draft
         rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
 
-    if owner_tg_id is not None:
-        # Toggle public/private for user prompts
-        label = "🔒 Make Private" if is_public else "🟢 Make Public"
-        rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
-
-    rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     
     # Navigation back based on context

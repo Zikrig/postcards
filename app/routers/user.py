@@ -107,6 +107,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 owner_tg_id=message.from_user.id,
                 is_public=False,
                 feach_data=normalized,
+                is_active=False,
             )
             
             # Add 'Users' tag
