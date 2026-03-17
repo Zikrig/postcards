@@ -533,7 +533,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                     ),
                 )
             except TelegramBadRequest:
@@ -545,7 +545,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                     ),
                 )
         else:
@@ -558,7 +558,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                     ),
                 )
             except TelegramBadRequest:
@@ -570,7 +570,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                     ),
                 )
         await callback.answer("Feature deleted")
@@ -709,7 +709,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                 ),
             )
         except TelegramBadRequest:
@@ -721,7 +721,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                 ),
             )
         await callback.answer()
@@ -880,7 +880,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     bool(prompt.get("is_active", True)),
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                 ),
             )
         await callback.answer()
@@ -1091,7 +1091,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                 ),
             )
         else:
@@ -1103,7 +1103,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in config.ADMIN_IDS and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
                 )
             )
         await callback.answer()
@@ -1474,7 +1474,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
 
-        is_admin = callback.from_user.id in config.ADMIN_IDS
+        is_admin = callback.from_user.id in ctx.settings.admin_ids
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
         if not (is_admin or is_owner):
             await callback.answer("No permission", show_alert=True)
@@ -2585,7 +2585,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         
         # Admin or owner can toggle
-        is_admin = callback.from_user.id in config.ADMIN_IDS
+        is_admin = callback.from_user.id in ctx.settings.admin_ids
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
         if not (is_admin or is_owner):
             await callback.answer("No permission", show_alert=True)

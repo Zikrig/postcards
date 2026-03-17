@@ -24,6 +24,8 @@ from app.repo import Repo
 from app.states import AdminStates
 from app.utils import ensure_dict, render_prompt, variable_token
 
+logger = logging.getLogger(__name__)
+
 
 BALANCE_BUCKET_KEY = "last_user_remaining_bucket_20"
 
@@ -46,6 +48,7 @@ class RouterCtx:
     async def ensure_user_from_tg(self, tg_user: Any) -> asyncpg.Record:
         assert tg_user is not None
         full_name = (tg_user.full_name or "").strip()
+        logger.debug(f"Ensuring user from TG: {tg_user.id} ({tg_user.username})")
         return await self.repo.upsert_user(
             tg_id=tg_user.id,
             username=tg_user.username or "",

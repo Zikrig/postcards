@@ -1,8 +1,11 @@
 """Database repository: users, prompts, promo codes, state."""
 import json
+import logging
 from typing import Any, Optional
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 
 class Repo:
@@ -10,6 +13,7 @@ class Repo:
         self.pool = pool
 
     async def init(self) -> None:
+        logger.info("Initializing Repo schema...")
         async with self.pool.acquire() as conn:
             await conn.execute(
                 """
