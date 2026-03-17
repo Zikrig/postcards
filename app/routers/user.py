@@ -23,7 +23,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         await state.clear()
         await ctx.edit_to_main_menu(callback.message)
 
-    @router.callback_query(F.data == "menu:tags")
+    @router.callback_query(F.data.startswith("menu:tags"))
     async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
             return
@@ -31,8 +31,15 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not user["is_authorized"]:
             await callback.answer("Please use /start first.", show_alert=True)
             return
+        data = (callback.data or "").strip()
+        page = 0
+        if data.startswith("menu:tags:"):
+            try:
+                page = int(data.split(":")[-1])
+            except ValueError:
+                pass
         await callback.answer()
-        await ctx.edit_to_tags_menu(callback.message)
+        await ctx.edit_to_tags_menu(callback.message, page=page)
 
     @router.callback_query(F.data.startswith("menu:tag:"))
     async def menu_tag_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -42,13 +49,18 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not user["is_authorized"]:
             await callback.answer("Please use /start first.", show_alert=True)
             return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 3:
+            await callback.answer("Invalid tag", show_alert=True)
+            return
         try:
-            tag_id = int((callback.data or "").split(":")[-1])
-        except ValueError:
+            tag_id = int(parts[2])
+            page = int(parts[3]) if len(parts) > 3 else 0
+        except (ValueError, IndexError):
             await callback.answer("Invalid tag", show_alert=True)
             return
         await callback.answer()
-        await ctx.edit_to_prompts_for_tag(callback.message, tag_id)
+        await ctx.edit_to_prompts_for_tag(callback.message, tag_id, page=page)
 
     @router.callback_query(F.data.startswith("prompt:select:"))
     async def prompt_pick_callback(callback: CallbackQuery, state: FSMContext) -> None:

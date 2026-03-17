@@ -18,7 +18,6 @@ from app.keyboards import (
     build_admin_tag_item_menu,
     build_admin_tags_menu,
     build_feature_config_menu,
-    build_prompt_assign_tag_menu,
     build_prompt_edit_menu,
     build_prompt_edit_tags_menu,
     build_prompt_edit_variable_actions_menu,
@@ -62,7 +61,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         )
         await callback.answer()
 
-    @router.callback_query(F.data == "admin:pw:list")
+    @router.callback_query((F.data == "admin:pw:list") | F.data.startswith("admin:pw:list:"))
     async def admin_prompt_list(callback: CallbackQuery) -> None:
         if not callback.message:
             return
@@ -70,17 +69,35 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        prompts = await ctx.repo.list_prompts()
-        if not prompts:
+        data = (callback.data or "").strip()
+        page = 0
+        if data.startswith("admin:pw:list:"):
+            try:
+                page = int(data.split(":")[-1])
+            except ValueError:
+                pass
+        prompts, total = await ctx.repo.list_prompts_paginated(active_only=False, page=page, per_page=ctx.repo.PAGE_SIZE)
+        if not total:
             await callback.message.answer(
                 "No prompts yet. Use «Generate new prompt» or «Add prompt (manual)».",
                 reply_markup=build_prompt_work_menu(),
             )
         else:
-            await callback.message.answer("List of prompts:", reply_markup=build_prompt_list_menu(prompts))
+            try:
+                await callback.message.edit_text(
+                    "List of prompts:",
+                    reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
+                )
+            except TelegramBadRequest:
+                await callback.message.answer(
+                    "List of prompts:",
+                    reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
+                )
         await callback.answer()
 
-    @router.callback_query(F.data == "admin:tags")
+    @router.callback_query(
+        (F.data == "admin:tags") | (F.data.startswith("admin:tags:") & (F.data != "admin:tags:back"))
+    )
     async def admin_tags_menu(callback: CallbackQuery) -> None:
         if not callback.message:
             return
@@ -88,8 +105,24 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        tags = await ctx.repo.list_tags()
-        await callback.message.answer("Tags:", reply_markup=build_admin_tags_menu(tags))
+        data = (callback.data or "").strip()
+        page = 0
+        if data.startswith("admin:tags:") and data != "admin:tags:back":
+            try:
+                page = int(data.split(":")[-1])
+            except ValueError:
+                pass
+        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+        try:
+            await callback.message.edit_text(
+                "Tags:",
+                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Tags:",
+                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
+            )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:tags:back")
@@ -130,8 +163,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         await ctx.repo.create_tag(name)
         await state.clear()
-        tags = await ctx.repo.list_tags()
-        await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags))
+        tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
+        await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
 
     @router.callback_query(F.data.startswith("admin:tag:item:"))
     async def admin_tag_item(callback: CallbackQuery) -> None:
@@ -187,8 +220,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         await ctx.repo.update_tag(int(tag_id), name)
         await state.clear()
-        tags = await ctx.repo.list_tags()
-        await message.answer("Tag renamed. Tags:", reply_markup=build_admin_tags_menu(tags))
+        tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
+        await message.answer("Tag renamed. Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
 
     @router.callback_query(F.data.startswith("admin:tag:delete:"))
     async def admin_tag_delete(callback: CallbackQuery) -> None:
@@ -204,11 +237,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Invalid tag", show_alert=True)
             return
         await ctx.repo.delete_tag(tag_id)
-        tags = await ctx.repo.list_tags()
+        tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
         try:
-            await callback.message.edit_text("Tags:", reply_markup=build_admin_tags_menu(tags))
+            await callback.message.edit_text("Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
         except TelegramBadRequest:
-            await callback.message.answer("Tags:", reply_markup=build_admin_tags_menu(tags))
+            await callback.message.answer("Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:tags:"))
@@ -219,83 +252,33 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        try:
-            prompt_id = int((callback.data or "").split(":")[-1])
-        except ValueError:
-            await callback.answer("Invalid prompt", show_alert=True)
-            return
-        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
-        all_tags = await ctx.repo.list_tags()
-        assigned = [t for t in all_tags if int(t["id"]) in tag_ids]
-        await callback.message.answer(
-            "Tags for this prompt. Click a tag to remove; use Add tag to assign.",
-            reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
-        )
-        await callback.answer()
-
-    @router.callback_query(F.data.startswith("admin:editpart:tag_add:"))
-    async def admin_editpart_tag_add(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
-        try:
-            prompt_id = int((callback.data or "").split(":")[-1])
-        except ValueError:
-            await callback.answer("Invalid prompt", show_alert=True)
-            return
-        tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
-        all_tags = await ctx.repo.list_tags()
-        to_choose = [t for t in all_tags if int(t["id"]) not in tag_ids]
-        if not to_choose:
-            await callback.answer("All tags already assigned.", show_alert=True)
-            return
-        await callback.message.answer(
-            "Choose a tag to assign:",
-            reply_markup=build_prompt_assign_tag_menu(prompt_id, to_choose),
-        )
-        await callback.answer()
-
-    @router.callback_query(F.data.startswith("admin:editpart:tag_assign:"))
-    async def admin_editpart_tag_assign(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
-        if len(parts) < 5:
-            await callback.answer("Invalid", show_alert=True)
+        if len(parts) < 4:
+            await callback.answer("Invalid prompt", show_alert=True)
             return
         try:
-            prompt_id = int(parts[-2])
-            tag_id = int(parts[-1])
-        except ValueError:
-            await callback.answer("Invalid", show_alert=True)
+            prompt_id = int(parts[3])
+            page = int(parts[4]) if len(parts) > 4 else 0
+        except (ValueError, IndexError):
+            await callback.answer("Invalid prompt", show_alert=True)
             return
         tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
-        if tag_id not in tag_ids:
-            tag_ids.append(tag_id)
-            await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
-        all_tags = await ctx.repo.list_tags()
-        assigned = [t for t in all_tags if int(t["id"]) in await ctx.repo.get_prompt_tag_ids(prompt_id)]
+        assigned_ids = set(tag_ids)
+        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
         try:
             await callback.message.edit_text(
-                "Tags for this prompt.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+                "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
             )
         except TelegramBadRequest:
             await callback.message.answer(
-                "Tags for this prompt.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+                "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
             )
         await callback.answer()
 
-    @router.callback_query(F.data.startswith("admin:editpart:tag_remove:"))
-    async def admin_editpart_tag_remove(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data.startswith("admin:editpart:tag_toggle:"))
+    async def admin_editpart_tag_toggle(callback: CallbackQuery) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
@@ -303,31 +286,31 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Admin only", show_alert=True)
             return
         parts = (callback.data or "").split(":")
-        if len(parts) < 5:
+        if len(parts) < 6:
             await callback.answer("Invalid", show_alert=True)
             return
         try:
-            prompt_id = int(parts[-2])
-            tag_id = int(parts[-1])
-        except ValueError:
+            prompt_id = int(parts[3])
+            tag_id = int(parts[4])
+            page = int(parts[5])
+        except (ValueError, IndexError):
             await callback.answer("Invalid", show_alert=True)
             return
         tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
         if tag_id in tag_ids:
             tag_ids.remove(tag_id)
-            await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
-        all_tags = await ctx.repo.list_tags()
-        assigned = [t for t in all_tags if int(t["id"]) in await ctx.repo.get_prompt_tag_ids(prompt_id)]
+        else:
+            tag_ids.append(tag_id)
+        await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
+        assigned_ids = set(await ctx.repo.get_prompt_tag_ids(prompt_id))
+        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
         try:
             await callback.message.edit_text(
-                "Tags for this prompt.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
+                "Tags: 🟢 = assigned, 🔴 = not assigned. Click to toggle.",
+                reply_markup=build_prompt_edit_tags_menu(prompt_id, tags, assigned_ids, page=page, total=total),
             )
         except TelegramBadRequest:
-            await callback.message.answer(
-                "Tags for this prompt.",
-                reply_markup=build_prompt_edit_tags_menu(prompt_id, assigned, all_tags),
-            )
+            pass
         await callback.answer()
 
     @router.callback_query(F.data == "admin:gen:start")

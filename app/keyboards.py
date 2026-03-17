@@ -6,6 +6,22 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .utils import btn_label, get_feach_option_enabled, variable_token
 
+PAGE_SIZE = 20
+
+
+def _pagination_buttons(
+    page: int, total: int, base_callback: str, back_callback: str, per_page: int = PAGE_SIZE
+) -> list[list[InlineKeyboardButton]]:
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+    row = []
+    if page > 0:
+        row.append(InlineKeyboardButton(text="◀ Prev", callback_data=f"{base_callback}:{page - 1}"))
+    if page < total_pages - 1:
+        row.append(InlineKeyboardButton(text="Next ▶", callback_data=f"{base_callback}:{page + 1}"))
+    row.append(InlineKeyboardButton(text="◀ Back", callback_data=back_callback))
+    return [row]
+
 
 def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
     """Main menu: prompts with 'Main Menu' tag first, then Generate button."""
@@ -17,23 +33,27 @@ def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMa
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_tags_menu(tags: list[asyncpg.Record]) -> InlineKeyboardMarkup:
-    """List of tags for Generate submenu; Back returns to main menu."""
+def build_tags_menu(
+    tags: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """List of tags for Generate submenu; pagination 20 per page."""
     buttons = [
         [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"menu:tag:{t['id']}")]
         for t in tags
     ]
-    buttons.append([InlineKeyboardButton(text="◀ Back", callback_data="menu:main")])
+    buttons.extend(_pagination_buttons(page, total, "menu:tags", "menu:main"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_prompts_by_tag_menu(prompts: list[asyncpg.Record], tag_id: int) -> InlineKeyboardMarkup:
-    """Prompts for one tag; Back returns to tags list."""
+def build_prompts_by_tag_menu(
+    prompts: list[asyncpg.Record], tag_id: int, page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """Prompts for one tag; Back returns to tags list; pagination 20 per page."""
     buttons = [
         [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
         for p in prompts
     ]
-    buttons.append([InlineKeyboardButton(text="◀ Back", callback_data="menu:tags")])
+    buttons.extend(_pagination_buttons(page, total, f"menu:tag:{tag_id}", "menu:tags"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -47,13 +67,15 @@ def build_admin_menu() -> InlineKeyboardMarkup:
     )
 
 
-def build_admin_tags_menu(tags: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+def build_admin_tags_menu(
+    tags: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"admin:tag:item:{t['id']}")]
         for t in tags
     ]
     rows.append([InlineKeyboardButton(text="Add tag", callback_data="admin:tag:add")])
-    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:tags:back")])
+    rows.extend(_pagination_buttons(page, total, "admin:tags", "admin:tags:back"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -79,13 +101,15 @@ def build_prompt_work_menu() -> InlineKeyboardMarkup:
     )
 
 
-def build_prompt_list_menu(prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
+def build_prompt_list_menu(
+    prompts: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
     rows = []
     for p in prompts:
         active = p.get("is_active", True)
         label = btn_label(f"{'🟢' if active else '🔴'} {p['title']}", 20)
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:pw:item:{p['id']}")])
-    rows.append([InlineKeyboardButton(text="Back", callback_data="admin:prompt_work")])
+    rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:prompt_work"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -187,29 +211,26 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
 
 def build_prompt_edit_tags_menu(
     prompt_id: int,
-    assigned_tags: list[asyncpg.Record],
-    all_tags: list[asyncpg.Record],
+    tags: list[asyncpg.Record],
+    assigned_ids: set[int],
+    page: int = 0,
+    total: int = 0,
 ) -> InlineKeyboardMarkup:
-    """Assigned tags + Add tag (if there are tags not yet assigned) + Back."""
-    assigned_ids = {int(t["id"]) for t in assigned_tags}
-    rows = [
-        [InlineKeyboardButton(text=f"✓ {btn_label(str(t['name']), 18)}", callback_data=f"admin:editpart:tag_remove:{prompt_id}:{t['id']}")]
-        for t in assigned_tags
-    ]
-    tags_to_add = [t for t in all_tags if int(t["id"]) not in assigned_ids]
-    if tags_to_add:
-        rows.append([InlineKeyboardButton(text="Add tag", callback_data=f"admin:editpart:tag_add:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Back to edit", callback_data=f"admin:edit:{prompt_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def build_prompt_assign_tag_menu(prompt_id: int, tags_to_choose: list[asyncpg.Record]) -> InlineKeyboardMarkup:
-    """Choose a tag to assign to prompt; Back to tags list for this prompt."""
-    rows = [
-        [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"admin:editpart:tag_assign:{prompt_id}:{t['id']}")]
-        for t in tags_to_choose
-    ]
-    rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:editpart:tags:{prompt_id}")])
+    """All tags with 🟢 (assigned) / 🔴 (not assigned); click toggles; pagination 20 per page."""
+    rows = []
+    for t in tags:
+        tid = int(t["id"])
+        name = btn_label(str(t["name"]), 18)
+        emoji = "🟢" if tid in assigned_ids else "🔴"
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{emoji} {name}",
+                callback_data=f"admin:editpart:tag_toggle:{prompt_id}:{tid}:{page}",
+            )
+        ])
+    rows.extend(
+        _pagination_buttons(page, total, f"admin:editpart:tags:{prompt_id}", f"admin:edit:{prompt_id}")
+    )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

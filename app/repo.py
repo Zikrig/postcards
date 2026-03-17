@@ -206,6 +206,8 @@ class Repo:
                 return None
             return int(row["balance_tokens"] or 0)
 
+    PAGE_SIZE = 20
+
     async def list_prompts(self, active_only: bool = False) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             if active_only:
@@ -213,6 +215,28 @@ class Repo:
                     "SELECT * FROM prompts WHERE is_active = TRUE ORDER BY id DESC"
                 )
             return await conn.fetch("SELECT * FROM prompts ORDER BY id DESC")
+
+    async def list_prompts_paginated(
+        self, active_only: bool = False, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        async with self.pool.acquire() as conn:
+            where = "WHERE is_active = TRUE" if active_only else ""
+            total = await conn.fetchval(f"SELECT COUNT(*) FROM prompts {where}")
+            total = int(total or 0)
+            offset = max(0, page) * per_page
+            if active_only:
+                rows = await conn.fetch(
+                    "SELECT * FROM prompts WHERE is_active = TRUE ORDER BY id DESC LIMIT $1 OFFSET $2",
+                    per_page,
+                    offset,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT * FROM prompts ORDER BY id DESC LIMIT $1 OFFSET $2",
+                    per_page,
+                    offset,
+                )
+            return list(rows), total
 
     async def get_prompt_by_title(self, title: str) -> Optional[asyncpg.Record]:
         async with self.pool.acquire() as conn:
@@ -304,6 +328,20 @@ class Repo:
         async with self.pool.acquire() as conn:
             return await conn.fetch("SELECT * FROM tags ORDER BY name")
 
+    async def list_tags_paginated(
+        self, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        async with self.pool.acquire() as conn:
+            total = await conn.fetchval("SELECT COUNT(*) FROM tags")
+            total = int(total or 0)
+            offset = max(0, page) * per_page
+            rows = await conn.fetch(
+                "SELECT * FROM tags ORDER BY name LIMIT $1 OFFSET $2",
+                per_page,
+                offset,
+            )
+            return list(rows), total
+
     async def get_tag_by_id(self, tag_id: int) -> Optional[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             return await conn.fetchrow("SELECT * FROM tags WHERE id = $1", tag_id)
@@ -370,6 +408,36 @@ class Repo:
                 """,
                 tag_id,
             )
+
+    async def list_prompts_with_tag_paginated(
+        self, tag_id: int, active_only: bool = True, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        async with self.pool.acquire() as conn:
+            where = " AND p.is_active = TRUE" if active_only else ""
+            total = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM prompts p
+                INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                WHERE pt.tag_id = $1
+                """ + where,
+                tag_id,
+            )
+            total = int(total or 0)
+            offset = max(0, page) * per_page
+            rows = await conn.fetch(
+                """
+                SELECT p.* FROM prompts p
+                INNER JOIN prompt_tags pt ON pt.prompt_id = p.id
+                WHERE pt.tag_id = $1
+                """ + where + """
+                ORDER BY p.id DESC
+                LIMIT $2 OFFSET $3
+                """,
+                tag_id,
+                per_page,
+                offset,
+            )
+            return list(rows), total
 
     MAIN_MENU_TAG_NAME = "Main Menu"
 
