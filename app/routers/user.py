@@ -103,16 +103,20 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
         owner_tg_id = prompt.get("owner_tg_id")
+        is_owner = owner_tg_id == callback.from_user.id
+        is_admin = bool(user.get("is_admin"))
+        
         logger.info(
             "my_prompt_item_callback: prompt_id=%s, owner_tg_id=%s, user_tg_id=%s, is_admin=%s",
             prompt_id,
             owner_tg_id,
             callback.from_user.id,
-            bool(user.get("is_admin")),
+            is_admin,
         )
-        if owner_tg_id != callback.from_user.id and not user.get("is_admin"):
+        if not is_owner and not is_admin:
             await callback.answer("Not your prompt", show_alert=True)
             return
+        
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
@@ -130,10 +134,11 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             prompt_id,
             feach_data or {},
             bool(prompt.get("is_active", True)),
-            owner_tg_id=prompt.get("owner_tg_id"),
+            owner_tg_id=owner_tg_id,
             is_public=prompt.get("is_public", False),
-            is_admin_view=False,
+            is_admin_view=is_admin and not is_owner,
             template=template,
+            show_clone=is_admin,
         )
         if example_ids:
             await callback.message.answer_photo(
@@ -180,6 +185,9 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
         is_admin = bool(user.get("is_admin"))
+        owner_tg_id = prompt.get("owner_tg_id")
+        is_owner = owner_tg_id == callback.from_user.id
+
         raw_examples = prompt.get("example_file_ids") or []
         if isinstance(raw_examples, str):
             try:
@@ -193,9 +201,9 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             prompt_id,
             feach_data or {},
             bool(prompt.get("is_active", True)),
-            owner_tg_id=prompt.get("owner_tg_id"),
+            owner_tg_id=owner_tg_id,
             is_public=prompt.get("is_public", False),
-            is_admin_view=True,
+            is_admin_view=is_admin and not is_owner,
             template=template,
             back_callback="menu:community_tags:0",
             show_clone=is_admin,

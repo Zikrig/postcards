@@ -285,12 +285,21 @@ def build_prompt_feach_menu(
     back_callback: Optional[str] = None,
     show_clone: Optional[bool] = None,
 ) -> InlineKeyboardMarkup:
+    """
+    Builds the main prompt card menu.
+    
+    Logic:
+    - is_admin_view: means "restricted admin view" (viewing someone else's user prompt).
+      If True, management buttons (Edit, Tags, Variables) are HIDDEN.
+    - show_clone: if True, show the "Clone to All (System)" button.
+    """
     features = feach_data.get("features") or {}
     rows = []
     
     draft_idea = feach_data.get("idea", "")
     is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here") or ("[" not in template and "<" not in template)
 
+    # Simplified view for admins browsing community/user prompts
     is_community_admin = is_admin_view and owner_tg_id is not None
 
     if not is_community_admin:
@@ -342,7 +351,9 @@ def build_prompt_feach_menu(
         
         rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
 
-    if (show_clone if show_clone is not None else is_admin_view) and not is_draft:
+    # Show Clone button if show_clone is True or if it's an admin view
+    can_clone = (show_clone if show_clone is not None else is_admin_view)
+    if can_clone and not is_draft:
         rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
 
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])

@@ -830,6 +830,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_public=prompt.get("is_public", False),
                         is_admin_view=view_as_admin,
                         template=template,
+                        show_clone=is_admin,
                     ),
                 )
             except TelegramBadRequest:
@@ -843,6 +844,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_public=prompt.get("is_public", False),
                         is_admin_view=view_as_admin,
                         template=template,
+                        show_clone=is_admin,
                     ),
                 )
         else:
@@ -857,6 +859,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_public=prompt.get("is_public", False),
                         is_admin_view=view_as_admin,
                         template=template,
+                        show_clone=is_admin,
                     ),
                 )
             except TelegramBadRequest:
@@ -870,6 +873,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_public=prompt.get("is_public", False),
                         is_admin_view=view_as_admin,
                         template=template,
+                        show_clone=is_admin,
                     ),
                 )
         await callback.answer("Feature deleted")
@@ -1026,6 +1030,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
         except TelegramBadRequest:
@@ -1039,6 +1044,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
         await callback.answer()
@@ -1210,6 +1216,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
 
@@ -1474,6 +1481,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
         else:
@@ -1936,6 +1944,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin_view,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
         except TelegramBadRequest:
@@ -1949,6 +1958,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin_view,
                     template=template,
+                    show_clone=is_admin,
                 ),
             )
         await callback.answer()
@@ -2434,6 +2444,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             is_public=updated.get("is_public", False),
             is_admin_view=is_admin_view,
             template=str(updated.get("template") or ""),
+            show_clone=is_admin,
         )
 
         try:
@@ -3374,6 +3385,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
                     template=template,
+                    show_clone=is_admin,
                 )
             )
 
