@@ -76,11 +76,17 @@ class RouterCtx:
         )
 
     async def show_prompts_for_tag(self, message: Message, tag_id: int, page: int = 0) -> None:
-        prompts, total = await self.repo.list_prompts_with_tag_paginated(
-            tag_id, active_only=True, page=page, per_page=self.repo.PAGE_SIZE
-        )
-        tag = await self.repo.get_tag_by_id(tag_id)
-        name = tag["name"] if tag else str(tag_id)
+        if tag_id == 0:
+            prompts, total = await self.repo.list_prompts_paginated(
+                active_only=True, page=page, per_page=self.repo.PAGE_SIZE
+            )
+            name = "All"
+        else:
+            prompts, total = await self.repo.list_prompts_with_tag_paginated(
+                tag_id, active_only=True, page=page, per_page=self.repo.PAGE_SIZE
+            )
+            tag = await self.repo.get_tag_by_id(tag_id)
+            name = tag["name"] if tag else str(tag_id)
         text = f"Prompts in «{name}»:" if prompts else f"No prompts in «{name}»."
         await message.answer(text, reply_markup=build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total))
 
@@ -102,11 +108,17 @@ class RouterCtx:
             await self.show_tags_menu(message, page)
 
     async def edit_to_prompts_for_tag(self, message: Message, tag_id: int, page: int = 0) -> None:
-        prompts, total = await self.repo.list_prompts_with_tag_paginated(
-            tag_id, active_only=True, page=page, per_page=self.repo.PAGE_SIZE
-        )
-        tag = await self.repo.get_tag_by_id(tag_id)
-        name = tag["name"] if tag else str(tag_id)
+        if tag_id == 0:
+            prompts, total = await self.repo.list_prompts_paginated(
+                active_only=True, page=page, per_page=self.repo.PAGE_SIZE
+            )
+            name = "All"
+        else:
+            prompts, total = await self.repo.list_prompts_with_tag_paginated(
+                tag_id, active_only=True, page=page, per_page=self.repo.PAGE_SIZE
+            )
+            tag = await self.repo.get_tag_by_id(tag_id)
+            name = tag["name"] if tag else str(tag_id)
         text = f"Prompts in «{name}»:" if prompts else f"No prompts in «{name}»."
         try:
             await message.edit_text(

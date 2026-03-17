@@ -37,10 +37,24 @@ def build_tags_menu(
     tags: list[asyncpg.Record], page: int = 0, total: int = 0
 ) -> InlineKeyboardMarkup:
     """List of tags for Generate submenu; pagination 20 per page."""
-    buttons = [
-        [InlineKeyboardButton(text=btn_label(str(t["name"]), 24), callback_data=f"menu:tag:{t['id']}")]
-        for t in tags
-    ]
+    buttons: list[list[InlineKeyboardButton]] = []
+    # Special virtual tag "All" – always first, not stored in DB
+    buttons.append(
+        [InlineKeyboardButton(text="All", callback_data="menu:tag:0")]
+    )
+    # All real tags except "Main Menu" (оно только для главного меню, не как категория)
+    buttons.extend(
+        [
+            [
+                InlineKeyboardButton(
+                    text=btn_label(str(t["name"]), 24),
+                    callback_data=f"menu:tag:{t['id']}",
+                )
+            ]
+            for t in tags
+            if str(t.get("name") or "") != "Main Menu"
+        ]
+    )
     buttons.extend(_pagination_buttons(page, total, "menu:tags", "menu:main"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
