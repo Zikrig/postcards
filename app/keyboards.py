@@ -139,6 +139,8 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
     rows.append([
         InlineKeyboardButton(text="Generate final", callback_data=f"admin:final:{prompt_id}"),
     ])
+    rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
     rows.append([
         InlineKeyboardButton(
             text="Deactivate" if is_active else "Activate",
@@ -146,7 +148,6 @@ def build_prompt_feach_menu(prompt_id: int, feach_data: dict[str, Any], is_activ
         ),
     ])
     rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")])

@@ -1412,19 +1412,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
-        feach_data = ensure_dict(prompt.get("feach_data") or {}) if prompt.get("feach_data") else None
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        if feach_data and feach_data.get("features"):
-            idea = feach_data.get("idea", "")
-            await callback.message.answer(
-                f"Prompt: {prompt['title']}\n\nIdea: {idea}",
-                reply_markup=build_prompt_feach_menu(prompt_id, feach_data, is_active),
-            )
-        else:
-            await callback.message.answer(
-                f"Prompt: {prompt['title']}",
-                reply_markup=build_prompt_item_menu(prompt_id, is_active),
-            )
+        idea = feach_data.get("idea", "") if feach_data else ""
+        text = f"Prompt: {prompt['title']}"
+        if idea:
+            text = f"{text}\n\nIdea: {idea}"
+        await callback.message.answer(
+            text,
+            reply_markup=build_prompt_feach_menu(prompt_id, feach_data or {}, is_active),
+        )
         await callback.answer()
     @router.callback_query(F.data.startswith("admin:edit:"))
     async def admin_edit_prompt_pick(callback: CallbackQuery, state: FSMContext) -> None:
