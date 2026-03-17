@@ -26,7 +26,12 @@ def _pagination_buttons(
 def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMarkup:
     """Main menu: prompts with 'Main Menu' tag first, then Generate button."""
     buttons = [
-        [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
+        [
+            InlineKeyboardButton(
+                text=btn_label(f"1 🪙 {p['title']}", 20),
+                callback_data=f"prompt:select:{p['id']}",
+            )
+        ]
         for p in main_menu_prompts
     ]
     buttons.append([InlineKeyboardButton(text="Generate", callback_data="menu:tags")])
@@ -64,7 +69,12 @@ def build_prompts_by_tag_menu(
 ) -> InlineKeyboardMarkup:
     """Prompts for one tag; Back returns to tags list; pagination 20 per page."""
     buttons = [
-        [InlineKeyboardButton(text=btn_label(str(p["title"]), 20), callback_data=f"prompt:select:{p['id']}")]
+        [
+            InlineKeyboardButton(
+                text=btn_label(f"1 🪙 {p['title']}", 20),
+                callback_data=f"prompt:select:{p['id']}",
+            )
+        ]
         for p in prompts
     ]
     buttons.extend(_pagination_buttons(page, total, f"menu:tag:{tag_id}", "menu:tags"))
@@ -123,6 +133,43 @@ def build_prompt_list_menu(
         active = p.get("is_active", True)
         label = btn_label(f"{'🟢' if active else '🔴'} {p['title']}", 20)
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:pw:item:{p['id']}")])
+    # Back from prompt list goes to tag list, not to Prompt work
+    rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:pw:list"))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_admin_prompt_tags_menu(
+    tags: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """
+    Tag filter for 'List of prompts' in admin:
+    - First: All (all prompts)
+    - Second: Main Menu (prompts with Main Menu tag)
+    - Then all other tags (paginated, 20 per page).
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    # All prompts
+    rows.append(
+        [InlineKeyboardButton(text="All", callback_data="admin:pw:list_tag:all:0")]
+    )
+    # Main Menu tag (virtual here; real tag is in DB)
+    rows.append(
+        [InlineKeyboardButton(text="Main Menu", callback_data="admin:pw:list_tag:main:0")]
+    )
+    # Other tags (excluding Main Menu)
+    for t in tags:
+        name = str(t.get("name") or "")
+        if name == "Main Menu":
+            continue
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=btn_label(name, 24),
+                    callback_data=f"admin:pw:list_tag:{t['id']}:0",
+                )
+            ]
+        )
+    # Pagination over real tags; Back to Prompt work
     rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:prompt_work"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

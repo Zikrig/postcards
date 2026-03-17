@@ -63,6 +63,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
     @router.callback_query((F.data == "admin:pw:list") | F.data.startswith("admin:pw:list:"))
     async def admin_prompt_list(callback: CallbackQuery) -> None:
+        """
+        List of prompts entry point: shows tag filter (All, Main Menu, other tags with pagination).
+        """
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
@@ -75,24 +78,18 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             try:
                 page = int(data.split(":")[-1])
             except ValueError:
-                pass
-        prompts, total = await ctx.repo.list_prompts_paginated(active_only=False, page=page, per_page=ctx.repo.PAGE_SIZE)
-        if not total:
-            await callback.message.answer(
-                "No prompts yet. Use «Generate new prompt» or «Add prompt (manual)».",
-                reply_markup=build_prompt_work_menu(),
+                page = 0
+        tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+        try:
+            await callback.message.edit_text(
+                "Choose tag for prompt list:",
+                reply_markup=build_admin_prompt_tags_menu(tags, page=page, total=total),
             )
-        else:
-            try:
-                await callback.message.edit_text(
-                    "List of prompts:",
-                    reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
-                )
-            except TelegramBadRequest:
-                await callback.message.answer(
-                    "List of prompts:",
-                    reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
-                )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "Choose tag for prompt list:",
+                reply_markup=build_admin_prompt_tags_menu(tags, page=page, total=total),
+            )
         await callback.answer()
 
     @router.callback_query(
@@ -111,28 +108,18 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             try:
                 page = int(data.split(":")[-1])
             except ValueError:
-                pass
+                page = 0
         tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
-        kb = build_admin_tags_menu(tags, page=page, total=total)
-        rows = list(kb.inline_keyboard)
-        # Always show virtual 'All' and real 'Main Menu' first
-        rows.insert(0, [InlineKeyboardButton(text="All", callback_data="admin:tags:info:all")])
-        main_tag = await ctx.repo.get_tag_by_name(ctx.repo.MAIN_MENU_TAG_NAME)
-        if main_tag:
-            rows.insert(
-                1,
-                [
-                    InlineKeyboardButton(
-                        text="Main Menu",
-                        callback_data=f"admin:tag:item:{main_tag['id']}",
-                    )
-                ],
-            )
-        kb = InlineKeyboardMarkup(inline_keyboard=rows)
         try:
-            await callback.message.edit_text("Tags:", reply_markup=kb)
+            await callback.message.edit_text(
+                "Tags:",
+                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
+            )
         except TelegramBadRequest:
-            await callback.message.answer("Tags:", reply_markup=kb)
+            await callback.message.answer(
+                "Tags:",
+                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
+            )
         await callback.answer()
 
     @router.callback_query(F.data == "admin:tags:back")
@@ -148,16 +135,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         except TelegramBadRequest:
             await callback.message.answer("Admin panel:", reply_markup=build_admin_menu())
         await callback.answer()
-
-    @router.callback_query(F.data == "admin:tags:info:all")
-    async def admin_tags_info_all(callback: CallbackQuery) -> None:
-        if not callback.message:
-            return
-        user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
-        await callback.answer("All: shows all active prompts grouped together.", show_alert=True)
 
     @router.callback_query(F.data == "admin:tag:add")
     async def admin_tag_add(callback: CallbackQuery, state: FSMContext) -> None:
@@ -1442,6 +1419,69 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             text,
             reply_markup=build_prompt_feach_menu(prompt_id, feach_data or {}, is_active),
         )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:pw:list_tag:"))
+    async def admin_prompt_list_by_tag(callback: CallbackQuery) -> None:
+        """
+        List prompts filtered by tag from the admin "List of prompts" menu.
+        Patterns:
+        - admin:pw:list_tag:all:<page>  -> all prompts
+        - admin:pw:list_tag:main:<page> -> prompts with Main Menu tag
+        - admin:pw:list_tag:<tag_id>:<page> -> prompts with given tag
+        """
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        tag_key = parts[3]
+        try:
+            page = int(parts[4]) if len(parts) > 4 else 0
+        except ValueError:
+            page = 0
+
+        if tag_key == "all":
+            prompts, total = await ctx.repo.list_prompts_paginated(
+                active_only=False, page=page, per_page=ctx.repo.PAGE_SIZE
+            )
+        elif tag_key == "main":
+            # Use real Main Menu tag behind the scenes
+            main_prompts = await ctx.repo.list_prompts_main_menu(active_only=False)
+            # Simple pagination in Python, as this is rare and small
+            total = len(main_prompts)
+            start = max(0, page) * ctx.repo.PAGE_SIZE
+            end = start + ctx.repo.PAGE_SIZE
+            prompts = main_prompts[start:end]
+        else:
+            try:
+                tag_id = int(tag_key)
+            except ValueError:
+                await callback.answer("Invalid tag", show_alert=True)
+                return
+            prompts, total = await ctx.repo.list_prompts_with_tag_paginated(
+                tag_id, active_only=False, page=page, per_page=ctx.repo.PAGE_SIZE
+            )
+
+        if not total:
+            await callback.answer("No prompts for this tag.", show_alert=True)
+            return
+
+        try:
+            await callback.message.edit_text(
+                "List of prompts:",
+                reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                "List of prompts:",
+                reply_markup=build_prompt_list_menu(prompts, page=page, total=total),
+            )
         await callback.answer()
     @router.callback_query(F.data.startswith("admin:edit:"))
     async def admin_edit_prompt_pick(callback: CallbackQuery, state: FSMContext) -> None:
