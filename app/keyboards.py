@@ -272,7 +272,7 @@ def build_prompt_feach_menu(
     rows = []
     
     draft_idea = feach_data.get("idea", "")
-    is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here")
+    is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here") or ("[" not in template and "<" not in template)
 
     for feat_key, feat in features.items():
         label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)

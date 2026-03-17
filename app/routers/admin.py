@@ -358,6 +358,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await message.answer("Calling bot…")
             api_feach = await ctx.deepseek.refine_idea(idea)
             normalized = normalize_feach_for_storage(api_feach)
+            draft_template = normalized.get("idea") or idea
         except Exception as e:
             await message.answer(f"DeepSeek error: {e}")
             await state.clear()
@@ -365,7 +366,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         try:
             await ctx.repo.insert_prompt(
                 title=title,
-                template=idea,
+                template=draft_template,
                 variable_descriptions={},
                 reference_photo_file_id=None,
                 created_by=user["tg_id"],

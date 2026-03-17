@@ -96,11 +96,12 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             from app.utils import normalize_feach_for_storage
             api_feach = await ctx.deepseek.refine_idea(idea)
             normalized = normalize_feach_for_storage(api_feach)
+            draft_template = normalized.get("idea") or idea
             
             # Create prompt
             prompt_id = await ctx.repo.insert_prompt(
                 title=title,
-                template=idea, # Using idea as draft template
+                template=draft_template, # Using refined idea as draft template
                 variable_descriptions={},
                 reference_photo_file_id=None,
                 created_by=message.from_user.id,
