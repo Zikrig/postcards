@@ -113,16 +113,26 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             except ValueError:
                 pass
         tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+        kb = build_admin_tags_menu(tags, page=page, total=total)
+        rows = list(kb.inline_keyboard)
+        # Always show virtual 'All' and real 'Main Menu' first
+        rows.insert(0, [InlineKeyboardButton(text="All", callback_data="admin:tags:info:all")])
+        main_tag = await ctx.repo.get_tag_by_name(ctx.repo.MAIN_MENU_TAG_NAME)
+        if main_tag:
+            rows.insert(
+                1,
+                [
+                    InlineKeyboardButton(
+                        text="Main Menu",
+                        callback_data=f"admin:tag:item:{main_tag['id']}",
+                    )
+                ],
+            )
+        kb = InlineKeyboardMarkup(inline_keyboard=rows)
         try:
-            await callback.message.edit_text(
-                "Tags:",
-                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
-            )
+            await callback.message.edit_text("Tags:", reply_markup=kb)
         except TelegramBadRequest:
-            await callback.message.answer(
-                "Tags:",
-                reply_markup=build_admin_tags_menu(tags, page=page, total=total),
-            )
+            await callback.message.answer("Tags:", reply_markup=kb)
         await callback.answer()
 
     @router.callback_query(F.data == "admin:tags:back")
@@ -138,6 +148,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         except TelegramBadRequest:
             await callback.message.answer("Admin panel:", reply_markup=build_admin_menu())
         await callback.answer()
+
+    @router.callback_query(F.data == "admin:tags:info:all")
+    async def admin_tags_info_all(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await callback.answer("All: shows all active prompts grouped together.", show_alert=True)
 
     @router.callback_query(F.data == "admin:tag:add")
     async def admin_tag_add(callback: CallbackQuery, state: FSMContext) -> None:
