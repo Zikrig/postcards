@@ -2171,6 +2171,40 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         await ctx.show_variable_pick_menu(callback.message, state)
         await callback.answer()
 
+    @router.callback_query(F.data.startswith("admin:editvar:add:"))
+    async def admin_add_variable_start(callback: CallbackQuery, state: FSMContext) -> None:
+        """
+        Start flow to add a new variable into the template.
+        Works both for first-time edit and later edits.
+        """
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+        await state.update_data(editing_prompt_id=prompt_id)
+        await state.set_state(AdminStates.waiting_new_variable_name)
+        await callback.message.answer(
+            "Enter new variable name (e.g. CHARACTER_POSITION). "
+            "Use only letters, numbers and underscores."
+        )
+        await callback.answer()
+
     @router.callback_query(F.data.startswith("admin:editvar:pick:"))
     async def admin_edit_variable_pick(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
@@ -2224,6 +2258,90 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         await ctx.show_variable_actions_menu(callback.message, state, var_idx)
         await callback.answer()
+
+    @router.message(AdminStates.waiting_new_variable_name)
+    async def admin_new_variable_name_entered(message: Message, state: FSMContext) -> None:
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user:
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            await state.clear()
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            return
+        name = (message.text or "").strip().upper()
+        if not name or any(ch for ch in name if not (ch.isalnum() or ch == "_")):
+            await message.answer("Invalid name. Use only letters, numbers and underscores. Try again:")
+            return
+        # Load current template and variables
+        prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
+        if not prompt:
+            await state.clear()
+            await message.answer("Prompt not found.")
+            return
+        template = prompt["template"]
+        variables = extract_variables(template)
+        if any(v.get("name") == name for v in variables):
+            await message.answer("Variable with this name already exists. Enter another name:")
+            return
+        await state.update_data(new_variable_name=name)
+        await state.set_state(AdminStates.waiting_new_variable_type)
+        await message.answer("Choose variable type: send 'text' or 'image'.")
+
+    @router.message(AdminStates.waiting_new_variable_type)
+    async def admin_new_variable_type_entered(message: Message, state: FSMContext) -> None:
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user:
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        name = data.get("new_variable_name")
+        if prompt_id is None or not name:
+            await state.clear()
+            await message.answer("Prompt edit session expired. Open edit menu again.")
+            return
+        vtype_raw = (message.text or "").strip().lower()
+        if vtype_raw not in {"text", "image"}:
+            await message.answer("Type must be 'text' or 'image'. Try again:")
+            return
+        vtype = vtype_raw
+        # Insert token into template at the end (admin потом может переставить вручную)
+        prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
+        if not prompt:
+            await state.clear()
+            await message.answer("Prompt not found.")
+            return
+        template = str(prompt.get("template") or "")
+        token = f"<{name}>" if vtype == "text" else f"[{name}]"
+        if token not in template:
+            if template and not template.endswith("\n"):
+                template = template + " "
+            template = template + token
+        # Re-extract variables and normalize descriptions
+        variables = extract_variables(template)
+        descriptions = ctx.normalize_variable_descriptions_for_template(
+            prompt.get("variable_descriptions") or {},
+            variables,
+        )
+        await ctx.repo.update_prompt(
+            prompt_id=int(prompt_id),
+            title=prompt["title"],
+            template=template,
+            variable_descriptions=descriptions,
+            reference_photo_file_id=prompt["reference_photo_file_id"],
+        )
+        await state.update_data(
+            prompt_title=prompt["title"],
+            prompt_template=template,
+            prompt_variables=variables,
+            variable_descriptions=descriptions,
+            reference_photo_file_id=prompt["reference_photo_file_id"],
+        )
+        await state.set_state(None)
+        await message.answer(f"Variable {token} added to template.")
+        # Показать обновлённый список переменных
+        await ctx.show_variable_pick_menu(message, state)
 
     @router.callback_query(F.data.startswith("admin:editvar:field:name:"))
     async def admin_edit_variable_name_start(callback: CallbackQuery, state: FSMContext) -> None:

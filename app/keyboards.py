@@ -470,6 +470,8 @@ def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, s
         rows.append(
             [InlineKeyboardButton(text=text, callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
         )
+    # Кнопка добавления новой переменной
+    rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Back to prompt edit", callback_data=f"admin:edit:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

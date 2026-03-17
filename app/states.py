@@ -32,6 +32,8 @@ class AdminStates(StatesGroup):
     waiting_user_prompt_title = State()
     waiting_user_prompt_idea = State()
     waiting_greeting_message = State()
+    waiting_new_variable_name = State()
+    waiting_new_variable_type = State()
 
 
 class GenerateStates(StatesGroup):
