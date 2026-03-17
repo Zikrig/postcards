@@ -260,6 +260,7 @@ def build_admin_users_with_prompts_menu(
 def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
+        [InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")],
         [InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")],
         [InlineKeyboardButton(
             text="Deactivate" if is_active else "Activate",
@@ -297,7 +298,11 @@ def build_prompt_feach_menu(
             rows.append([
                 InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
             ])
-        
+        # Кнопка добавления переменной сразу под списком фич
+        rows.append([
+            InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}"),
+        ])
+
         # Generate final is only for non-community admin view
         rows.append([
             InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}"),
@@ -312,7 +317,6 @@ def build_prompt_feach_menu(
             test_label = "1 🪙 Test" if owner_tg_id else "Test"
             rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
             rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-            rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
             # В юзерском меню (owner_tg_id задан) не показываем Deactivate/Activate,
             # чтобы не дублировать управление доступностью с Make Public/Make Private.
             if owner_tg_id is None:
