@@ -707,6 +707,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
         template = str(prompt.get("template") or "")
+        user = await ctx.repo.get_user(callback.from_user.id)
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
         try:
             await callback.message.edit_text(
                 "Done. Back to prompt.",
@@ -716,7 +719,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=is_admin and not is_owner,
                     template=template,
                 ),
             )
@@ -729,7 +732,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=is_admin and not is_owner,
                     template=template,
                 ),
             )
@@ -1105,6 +1108,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {}) if prompt.get("feach_data") else None
         is_active = bool(prompt.get("is_active", True))
         template = str(prompt.get("template") or "")
+        # Для admin-view опираемся на роль из БД, а не только на settings.admin_ids
+        user = await ctx.repo.get_user(callback.from_user.id)
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
         if feach_data and feach_data.get("features"):
             await callback.message.answer(
                 f"Prompt: {prompt['title']}\nIdea: {feach_data.get('idea', '')}",
@@ -1114,7 +1121,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=is_admin and not is_owner,
                     template=template,
                 ),
             )
@@ -1127,7 +1134,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=is_admin and not is_owner,
                     template=template,
                 )
             )
@@ -1489,6 +1496,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
     async def admin_prompt_item_actions(callback: CallbackQuery) -> None:
         if not callback.message:
             return
+        # Определяем пользователя и его роль один раз
+        user = await ctx.repo.get_user(callback.from_user.id)
+        is_admin = bool(user and user.get("is_admin"))
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -1499,7 +1509,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
 
-        is_admin = callback.from_user.id in ctx.settings.admin_ids
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
         if not (is_admin or is_owner):
             await callback.answer("No permission", show_alert=True)
@@ -1507,8 +1516,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        is_admin = callback.from_user.id in ctx.settings.admin_ids
-        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        # is_admin / is_owner уже посчитаны выше
 
         idea = feach_data.get("idea", "") if feach_data else ""
         template = str(prompt.get("template") or "")
@@ -2630,17 +2638,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         # Refresh menu
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
-            feach_data = ensure_dict(prompt.get("feach_data") or {})
-            template = str(prompt.get("template") or "")
-            await callback.message.edit_reply_markup(
-                reply_markup=build_prompt_feach_menu(
-                    prompt_id,
-                    feach_data,
-                    prompt["is_active"],
-                    owner_tg_id=prompt.get("owner_tg_id"),
-                    is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin and not is_owner,
-                    template=template,
-                )
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        template = str(prompt.get("template") or "")
+        await callback.message.edit_reply_markup(
+            reply_markup=build_prompt_feach_menu(
+                prompt_id,
+                feach_data,
+                prompt["is_active"],
+                owner_tg_id=prompt.get("owner_tg_id"),
+                is_public=prompt.get("is_public", False),
+                is_admin_view=is_admin and not is_owner,
+                template=template,
             )
+        )
 
