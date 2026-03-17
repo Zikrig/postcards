@@ -38,8 +38,7 @@ def load_settings() -> Settings:
 
     if not bot_token:
         raise RuntimeError("BOT_TOKEN is required in .env")
-    if not user_password:
-        raise RuntimeError("USER_PASSWORD is required in .env")
+    # USER_PASSWORD больше не обязателен
     if not api_key:
         raise RuntimeError("API_KEY is required in .env")
 

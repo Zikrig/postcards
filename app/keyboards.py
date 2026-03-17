@@ -506,6 +506,8 @@ def build_promo_item_menu(promo_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="Edit", callback_data=f"admin:promo:edit:{promo_id}")],
+            [InlineKeyboardButton(text="Toggle active", callback_data=f"admin:promo:toggle_active:{promo_id}")],
+            [InlineKeyboardButton(text="Reset uses", callback_data=f"admin:promo:reset_uses:{promo_id}")],
             [InlineKeyboardButton(text="Delete", callback_data=f"admin:promo:delete:{promo_id}")],
             [InlineKeyboardButton(text="Back to list", callback_data="admin:promo_menu")],
         ]

@@ -704,6 +704,29 @@ class Repo:
             result = await conn.execute("DELETE FROM promo_codes WHERE id = $1", promo_id)
             return result.endswith("1")
 
+    async def set_promo_active(self, promo_id: int, is_active: bool) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE promo_codes
+                SET is_active = $1
+                WHERE id = $2
+                """,
+                is_active,
+                promo_id,
+            )
+
+    async def reset_promo_uses(self, promo_id: int) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE promo_codes
+                SET uses_count = 0
+                WHERE id = $1
+                """,
+                promo_id,
+            )
+
     async def redeem_promo_code(self, code: str, user_tg_id: int) -> tuple[bool, str, int]:
         async with self.pool.acquire() as conn:
             async with conn.transaction():

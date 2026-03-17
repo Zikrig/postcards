@@ -5,7 +5,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from app.keyboards import build_admin_menu
-from app.states import AuthStates
 
 from .common import RouterCtx
 
@@ -30,36 +29,20 @@ def register_auth(router: Router, ctx: RouterCtx) -> None:
             else:
                 await message.answer(promo_message)
 
-        if user["is_authorized"]:
-            balance = await ctx.repo.get_user_balance(user["tg_id"])
-            await message.answer(
-                f"{promo_block}"
-                "Welcome!\n"
-                "Choose one of the prompt buttons below.\n"
-                "For each prompt, I will ask for required values and then generate an image.\n"
-                f"Your balance: {balance}"
-            )
-            await ctx.show_prompt_buttons(message)
-            return
+        # Автоматически авторизуем пользователя при старте (пароль больше не требуется)
+        if not user["is_authorized"]:
+            await ctx.repo.set_user_authorized(user["tg_id"], True)
 
+        balance = await ctx.repo.get_user_balance(user["tg_id"])
         await message.answer(
             f"{promo_block}"
-            "Please enter password to continue.\n\n"
+            "Welcome!\n"
+            "Choose one of the prompt buttons below.\n"
+            "For each prompt, I will ask for required values and then generate an image.\n"
+            f"Your balance: {balance}"
         )
-        await state.set_state(AuthStates.waiting_password)
-
-    @router.message(AuthStates.waiting_password)
-    async def password_handler(message: Message, state: FSMContext) -> None:
-        user = await ctx.ensure_user(message)
-        text = (message.text or "").strip()
-        if text == ctx.settings.user_password:
-            await ctx.repo.set_user_authorized(user["tg_id"], True)
-            balance = await ctx.repo.get_user_balance(user["tg_id"])
-            await message.answer(f"Access granted.\nYour balance: {balance}")
-            await state.clear()
-            await ctx.show_prompt_buttons(message)
-            return
-        await message.answer("Wrong password. Try again:")
+        await ctx.show_prompt_buttons(message)
+        return
 
     @router.message(Command("admin"))
     async def admin_handler(message: Message) -> None:

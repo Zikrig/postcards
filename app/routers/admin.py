@@ -1405,6 +1405,50 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.message.answer("Promo was not deleted.")
         await callback.answer()
 
+    @router.callback_query(F.data.startswith("admin:promo:toggle_active:"))
+    async def admin_promo_toggle_active(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            promo_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid promo id", show_alert=True)
+            return
+        promo = await ctx.repo.get_promo_code_by_id(promo_id)
+        if not promo:
+            await callback.answer("Promo not found", show_alert=True)
+            return
+        new_active = not promo["is_active"]
+        await ctx.repo.set_promo_active(promo_id, new_active)
+        status_text = "activated" if new_active else "deactivated"
+        await callback.message.answer(f"Promo {promo['code']} {status_text}.")
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:promo:reset_uses:"))
+    async def admin_promo_reset_uses(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        try:
+            promo_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid promo id", show_alert=True)
+            return
+        promo = await ctx.repo.get_promo_code_by_id(promo_id)
+        if not promo:
+            await callback.answer("Promo not found", show_alert=True)
+            return
+        await ctx.repo.reset_promo_uses(promo_id)
+        await callback.message.answer(f"Promo {promo['code']} uses counter reset to 0.")
+        await callback.answer()
+
     @router.message(AdminStates.waiting_promo_code)
     async def admin_promo_code_value(message: Message, state: FSMContext) -> None:
         code = (message.text or "").strip()
@@ -1717,8 +1761,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -1728,6 +1772,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await state.clear()
         await state.update_data(
@@ -1749,8 +1798,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -1760,6 +1809,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await state.clear()
         await state.update_data(
@@ -1782,8 +1836,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -1793,6 +1847,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         template = prompt["template"]
         variables = extract_variables(template)
@@ -2129,8 +2188,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -2140,6 +2199,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await state.clear()
         await state.update_data(
@@ -2162,8 +2226,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -2173,6 +2237,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await ctx.repo.update_prompt(
             prompt_id=prompt_id,
@@ -2192,8 +2261,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -2203,6 +2272,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         current = prompt.get("example_file_ids")
         if isinstance(current, str):

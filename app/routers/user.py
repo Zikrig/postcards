@@ -273,14 +273,16 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
 
             await msg.delete()
             await message.answer(
-                f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance}).\n"
-                "Now you need to generate the final template in 'My prompts'."
+                f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance})."
             )
+            # Сразу открываем меню редактирования для только что созданного промпта
+            prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+            if prompt:
+                await ctx.show_prompt_edit_actions(message, prompt)
         except Exception as e:
             await message.answer(f"Error refining idea: {e}")
         finally:
             await state.clear()
-            await ctx.show_user_prompts(message, message.from_user.id)
 
     @router.callback_query(F.data.startswith("menu:tags"))
     async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -330,7 +332,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             return
         user = await ctx.ensure_user_from_tg(callback.from_user)
         if not user["is_authorized"]:
-            await callback.answer("Please use /start and enter password first.", show_alert=True)
+            await callback.answer("Please use /start first.", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -379,7 +381,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             return
         user = await ctx.ensure_user_from_tg(callback.from_user)
         if not user["is_authorized"]:
-            await callback.answer("Please use /start and enter password first.", show_alert=True)
+            await callback.answer("Please use /start first.", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -427,7 +429,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
     async def prompt_pick_handler(message: Message, state: FSMContext) -> None:
         user = await ctx.ensure_user(message)
         if not user["is_authorized"]:
-            await message.answer("Please use /start and enter password first.")
+            await message.answer("Please use /start first.")
             return
         await ctx.show_prompt_buttons(message)
 
