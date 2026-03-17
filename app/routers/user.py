@@ -2,6 +2,7 @@
 import logging
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -342,16 +343,24 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             example_ids = [str(f) for f in example_ids[:3] if f]
         markup = build_prompt_preview_menu(prompt_id, back_callback="menu:main")
         if example_ids:
-            await callback.message.answer_photo(
-                photo=example_ids[0],
-                caption=desc,
-                reply_markup=markup,
-            )
-            for fid in example_ids[1:]:
+            try:
+                await callback.message.answer_photo(
+                    photo=example_ids[0],
+                    caption=desc,
+                    reply_markup=markup,
+                )
+            except TelegramBadRequest:
+                # Если file_id битый, показываем только текст
                 try:
-                    await callback.message.answer_photo(photo=fid)
+                    await callback.message.edit_text(desc, reply_markup=markup)
                 except Exception:
-                    pass
+                    await callback.message.answer(desc, reply_markup=markup)
+            else:
+                for fid in example_ids[1:]:
+                    try:
+                        await callback.message.answer_photo(photo=fid)
+                    except Exception:
+                        pass
         else:
             try:
                 await callback.message.edit_text(desc, reply_markup=markup)
