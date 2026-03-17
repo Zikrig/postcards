@@ -453,8 +453,34 @@ class Repo:
             desc = source.get("description") or source.get("title") or target_title
             row = await conn.fetchrow(
                 """
-                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, feach_data, owner_tg_id, is_public, source_prompt_id, description)
-                VALUES ($1, $2, $3, $4, $5, $6, NULL, TRUE, $7, $8)
+                INSERT INTO prompts (
+                    title,
+                    template,
+                    variable_descriptions,
+                    reference_photo_file_id,
+                    created_by,
+                    is_active,
+                    feach_data,
+                    owner_tg_id,
+                    is_public,
+                    source_prompt_id,
+                    description,
+                    example_file_ids
+                )
+                VALUES (
+                    $1,
+                    $2,
+                    $3::jsonb,
+                    $4,
+                    $5,
+                    TRUE,
+                    $6::jsonb,
+                    NULL,
+                    TRUE,
+                    $7,
+                    $8,
+                    $9::jsonb
+                )
                 RETURNING id
                 """,
                 target_title,
@@ -465,6 +491,7 @@ class Repo:
                 source["feach_data"],
                 source_id,
                 desc,
+                source.get("example_file_ids") or "[]",
             )
             return int(row["id"])
 

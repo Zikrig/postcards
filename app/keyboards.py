@@ -311,12 +311,15 @@ def build_prompt_feach_menu(
             test_label = "1 🪙 Test" if owner_tg_id else "Test"
             rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
             rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-            rows.append([
-                InlineKeyboardButton(
-                    text="Deactivate" if is_active else "Activate",
-                    callback_data=f"admin:active:{prompt_id}",
-                ),
-            ])
+            # В юзерском меню (owner_tg_id задан) не показываем Deactivate/Activate,
+            # чтобы не дублировать управление доступностью с Make Public/Make Private.
+            if owner_tg_id is None:
+                rows.append([
+                    InlineKeyboardButton(
+                        text="Deactivate" if is_active else "Activate",
+                        callback_data=f"admin:active:{prompt_id}",
+                    ),
+                ])
             rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
 
             if owner_tg_id is not None:
