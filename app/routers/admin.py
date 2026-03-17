@@ -15,6 +15,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from app.keyboards import (
     build_admin_menu,
+    build_admin_prompt_tags_menu,
     build_admin_tag_item_menu,
     build_admin_tags_menu,
     build_feature_config_menu,
