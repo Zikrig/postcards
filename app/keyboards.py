@@ -4,7 +4,7 @@ from typing import Any, Optional
 import asyncpg
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from .utils import btn_label, get_feach_option_enabled, variable_token
+from .utils import btn_label, get_feach_option_enabled, variable_token, pretty_variable_label
 
 PAGE_SIZE = 20
 
@@ -456,9 +456,11 @@ def build_prompt_edit_tags_menu(
 def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, str]]) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for idx, var in enumerate(variables):
-        token = variable_token(var)
+        # Читабельные имена переменных: CHARACTER_POSITION → "Character position"
+        label = pretty_variable_label(var.get("name", ""), max_length=25)
+        text = label or variable_token(var)
         rows.append(
-            [InlineKeyboardButton(text=btn_label(token, 20), callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
+            [InlineKeyboardButton(text=text, callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
         )
     rows.append([InlineKeyboardButton(text="Back to prompt edit", callback_data=f"admin:edit:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -31,6 +31,26 @@ def variable_token(variable: dict[str, str]) -> str:
     return f"<{name}>"
 
 
+def pretty_variable_label(name: str, max_length: int = 25) -> str:
+    """
+    Human‑readable label from VARIABLE_NAME:
+    - CHARACTER_POSITION → "Character position"
+    - Max length limited to max_length.
+    """
+    s = (name or "").strip()
+    if not s:
+        return ""
+    # Replace separators with spaces and normalize whitespace
+    s = re.sub(r"[_\-]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    # Lowercase then capitalize first letter
+    s = s.lower()
+    s = s[0].upper() + s[1:]
+    if len(s) > max_length:
+        s = s[:max_length]
+    return s
+
+
 def render_prompt(template: str, answers: dict[str, str]) -> str:
     result = template
     for key, value in answers.items():

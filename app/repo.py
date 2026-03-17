@@ -451,6 +451,13 @@ class Repo:
                 raise ValueError("Source prompt not found")
             
             desc = source.get("description") or source.get("title") or target_title
+            # Normalize examples to JSON string
+            examples_raw = source.get("example_file_ids")
+            if isinstance(examples_raw, str):
+                examples_json = examples_raw or "[]"
+            else:
+                examples_json = json.dumps(examples_raw or [])
+
             row = await conn.fetchrow(
                 """
                 INSERT INTO prompts (
@@ -491,7 +498,7 @@ class Repo:
                 source["feach_data"],
                 source_id,
                 desc,
-                source.get("example_file_ids") or "[]",
+                examples_json,
             )
             return int(row["id"])
 
