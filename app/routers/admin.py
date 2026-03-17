@@ -152,17 +152,75 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
     @router.message(AdminStates.waiting_tag_name)
     async def admin_tag_name_entered(message: Message, state: FSMContext) -> None:
+        """
+        Ввод имени тега:
+        - если есть контекст tag_add_* → добавление тега из экрана тегов промпта (admin/owner),
+          затем возврат на этот же экран;
+        - иначе классический админский сценарий добавления глобального тега.
+        """
         user = await ctx.repo.get_user(message.from_user.id)
-        if not user or not user["is_admin"]:
-            return
+        data = await state.get_data()
         name = (message.text or "").strip()
         if not name:
             await message.answer("Tag name cannot be empty. Enter tag name:")
             return
-        await ctx.repo.create_tag(name)
-        await state.clear()
-        tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
-        await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
+
+        prompt_id = data.get("tag_add_prompt_id")
+        if prompt_id:
+            # Добавление тега из экрана конкретного промпта
+            page = int(data.get("tag_add_page", 0))
+            is_admin_ctx = bool(data.get("tag_add_is_admin"))
+
+            prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
+            if not prompt:
+                await state.clear()
+                await message.answer("Prompt not found.")
+                return
+
+            is_admin = bool(user and user.get("is_admin"))
+            is_owner = prompt.get("owner_tg_id") == message.from_user.id
+            if not (is_admin or is_owner):
+                await state.clear()
+                await message.answer("Not allowed.")
+                return
+
+            tag = await ctx.repo.create_tag(name)
+            tag_id = int(tag["id"])
+            # Привязываем новый тег к промпту
+            tag_ids = await ctx.repo.get_prompt_tag_ids(int(prompt_id))
+            if tag_id not in tag_ids:
+                tag_ids.append(tag_id)
+                await ctx.repo.set_prompt_tags(int(prompt_id), tag_ids)
+
+            # Обновляем экран тегов
+            assigned_ids = set(await ctx.repo.get_prompt_tag_ids(int(prompt_id)))
+            if is_admin_ctx:
+                tags, total = await ctx.repo.list_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+                back_cb = f"admin:pw:item:{prompt_id}"
+            else:
+                tags, total = await ctx.repo.list_community_tags_paginated(page=page, per_page=ctx.repo.PAGE_SIZE)
+                back_cb = f"menu:my_prompt_item:{prompt_id}"
+
+            await state.clear()
+            await message.answer(
+                "Tag added.",
+                reply_markup=build_prompt_edit_tags_menu(
+                    int(prompt_id),
+                    tags,
+                    assigned_ids,
+                    page=page,
+                    total=total,
+                    back_callback=back_cb,
+                ),
+            )
+        else:
+            # Старый админский сценарий: добавление глобального тега из админ-меню
+            if not user or not user["is_admin"]:
+                return
+            await ctx.repo.create_tag(name)
+            await state.clear()
+            tags, total = await ctx.repo.list_tags_paginated(page=0, per_page=ctx.repo.PAGE_SIZE)
+            await message.answer("Tag added. Tags:", reply_markup=build_admin_tags_menu(tags, page=0, total=total))
 
     @router.callback_query(F.data.startswith("admin:tag:item:"))
     async def admin_tag_item(callback: CallbackQuery) -> None:
@@ -299,6 +357,40 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     back_callback=back_cb,
                 ),
             )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:tag_add:"))
+    async def admin_or_user_tag_add(callback: CallbackQuery, state: FSMContext) -> None:
+        """
+        Добавление нового тега из экрана редактирования тегов промпта.
+        Доступно админу (общие теги) и владельцу промпта (community-теги).
+        """
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[3])
+            page = int(parts[4])
+        except (ValueError, IndexError):
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+        # Сохраняем контекст, чтобы после ввода имени тега вернуть пользователя на тот же экран.
+        await state.update_data(tag_add_prompt_id=prompt_id, tag_add_page=page, tag_add_is_admin=is_admin)
+        await state.set_state(AdminStates.waiting_tag_name)
+        await callback.message.answer("Enter new tag name:")
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:tag_toggle:"))

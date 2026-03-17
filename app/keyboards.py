@@ -448,6 +448,12 @@ def build_prompt_edit_tags_menu(
     # Main Menu сверху, затем остальные теги в исходном порядке
     rows.extend(main_menu_rows)
     rows.extend(other_rows)
+
+    # Кнопка добавления тега (доступна и админу, и владельцу промпта)
+    rows.append(
+        [InlineKeyboardButton(text="➕ Add tag", callback_data=f"admin:editpart:tag_add:{prompt_id}:{page}")]
+    )
+
     base_cb = f"admin:editpart:tags:{prompt_id}"
     back_cb = back_callback or f"admin:pw:item:{prompt_id}"
     rows.extend(_pagination_buttons(page, total, base_cb, back_cb))
