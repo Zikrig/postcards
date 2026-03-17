@@ -28,7 +28,7 @@ def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMa
     buttons = [
         [
             InlineKeyboardButton(
-                text=btn_label(f"1 🪙 {p['title']}", 20),
+                text=btn_label(f"📄 {p['title']}", 20),
                 callback_data=f"prompt:select:{p['id']}",
             )
         ]
@@ -95,7 +95,7 @@ def build_prompts_by_tag_menu(
     buttons = [
         [
             InlineKeyboardButton(
-                text=btn_label(f"1 🪙 {p['title']}", 20),
+                text=btn_label(f"📄 {p['title']}", 20),
                 callback_data=f"prompt:select:{p['id']}",
             )
         ]
@@ -103,6 +103,16 @@ def build_prompts_by_tag_menu(
     ]
     buttons.extend(_pagination_buttons(page, total, f"menu:tag:{tag_id}", "menu:tags"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_prompt_preview_menu(prompt_id: int, back_callback: str = "menu:main") -> InlineKeyboardMarkup:
+    """Клавиатура экрана превью промпта: описание + иллюстрации, затем Генерировать (1 🪙) и Назад."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚀 Generate (1 🪙)", callback_data=f"prompt:generate:{prompt_id}")],
+            [InlineKeyboardButton(text="◀ Back", callback_data=back_callback)],
+        ]
+    )
 
 
 def build_user_prompts_menu(
@@ -384,6 +394,7 @@ def build_feature_config_menu(
 def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
             [InlineKeyboardButton(text="Edit variables", callback_data=f"admin:editpart:variables:{prompt_id}")],

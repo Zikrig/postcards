@@ -54,9 +54,11 @@ LANGUAGE: Use English only. The template and all variable_descriptions (descript
 
 RULES:
 - Reply ONLY with valid JSON. No markdown, no code fence.
-- JSON has two keys: "template" and "variable_descriptions".
+- JSON has three keys: "description", "template", and "variable_descriptions".
 
-1) "template" (string): A LONG, STRUCTURED prompt in English (several paragraphs) that will be sent to an image model.
+1) "description" (string): A SHORT user-facing one-sentence summary of the image style/scene in English (e.g. "Create a cinematic portrait of a person in a vintage space suit on the Moon."). No placeholders. Max 200 characters.
+
+2) "template" (string): A LONG, STRUCTURED prompt in English (several paragraphs) that will be sent to an image model.
    - Use placeholders: [VARNAME] for image (e.g. [USER_PHOTO]), <VARNAME> for text (e.g. <STYLE>).
    - Whenever the user's reference photo or the person from that photo is mentioned, use exactly [USER_PHOTO] in square brackets (e.g. "the person from [USER_PHOTO]", "Use [USER_PHOTO] as the appearance of the real person", "standing next to [USER_PHOTO]").
    - Structure the template with clear sections on separate lines, for example:
@@ -72,7 +74,7 @@ RULES:
    - Each section can be 1–3 sentences. Total template length: at least 150 words. Use newlines between sections.
    - Include [USER_PHOTO] multiple times where it makes sense (e.g. in Scene, Characters, Style, Lighting). Do not explain; output only the template string.
 
-2) "variable_descriptions" (object): Keys are the placeholder strings exactly as in the template ([VARNAME] or <VARNAME>). Each value is an object:
+3) "variable_descriptions" (object): Keys are the placeholder strings exactly as in the template ([VARNAME] or <VARNAME>). Each value is an object:
    - "description": short user-facing text in English
    - "options": array of strings in English (empty [] if free text only)
    - "allow_custom": boolean
@@ -257,4 +259,5 @@ class DeepSeekClient:
         return {
             "template": str(raw["template"]),
             "variable_descriptions": raw.get("variable_descriptions") or {},
+            "description": str((raw.get("description") or "").strip())[:500] or "",
         }

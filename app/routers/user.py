@@ -6,7 +6,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
-from app.keyboards import build_prompt_feach_menu
+from app.keyboards import build_prompt_feach_menu, build_prompt_preview_menu
 from app.states import AdminStates, GenerateStates
 from app.utils import ensure_dict, extract_variables, variable_token
 
@@ -104,12 +104,9 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
-        idea = feach_data.get("idea", "") if feach_data else ""
-        text = f"Prompt: {prompt['title']}"
-        if idea:
-            text = f"{text}\n\nIdea: {idea}"
+        desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
         await callback.message.edit_text(
-            text,
+            desc,
             reply_markup=build_prompt_feach_menu(
                 prompt_id,
                 feach_data or {},
@@ -120,6 +117,14 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 template=template,
             ),
         )
+        example_ids = prompt.get("example_file_ids") or []
+        if isinstance(example_ids, list):
+            for fid in example_ids[:3]:
+                if fid:
+                    try:
+                        await callback.message.answer_photo(photo=str(fid))
+                    except Exception:
+                        pass
         await callback.answer()
 
     @router.callback_query(F.data.startswith("menu:community_prompt:"))
@@ -145,13 +150,10 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
-        idea = feach_data.get("idea", "") if feach_data else ""
-        text = f"Prompt: {prompt['title']}"
-        if idea:
-            text = f"{text}\n\nIdea: {idea}"
+        desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
         is_admin = bool(user.get("is_admin"))
         await callback.message.edit_text(
-            text,
+            desc,
             reply_markup=build_prompt_feach_menu(
                 prompt_id,
                 feach_data or {},
@@ -164,6 +166,14 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 show_clone=is_admin,
             ),
         )
+        example_ids = prompt.get("example_file_ids") or []
+        if isinstance(example_ids, list):
+            for fid in example_ids[:3]:
+                if fid:
+                    try:
+                        await callback.message.answer_photo(photo=str(fid))
+                    except Exception:
+                        pass
         await callback.answer()
 
     @router.callback_query(F.data == "menu:create_prompt")
@@ -299,25 +309,62 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         await ctx.edit_to_prompts_for_tag(callback.message, tag_id, page=page)
 
     @router.callback_query(F.data.startswith("prompt:select:"))
-    async def prompt_pick_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    async def prompt_preview_callback(callback: CallbackQuery) -> None:
+        """Показ превью: описание + иллюстрации, кнопки Generate (1 🪙) и Back."""
         if not callback.message:
             return
         user = await ctx.ensure_user_from_tg(callback.from_user)
         if not user["is_authorized"]:
             await callback.answer("Please use /start and enter password first.", show_alert=True)
             return
-
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
             await callback.answer("Invalid prompt", show_alert=True)
             return
-
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+        desc = (prompt.get("description") or prompt.get("title") or "").strip() or str(prompt.get("title", ""))
+        try:
+            await callback.message.edit_text(
+                desc,
+                reply_markup=build_prompt_preview_menu(prompt_id, back_callback="menu:main"),
+            )
+        except Exception:
+            await callback.message.answer(
+                desc,
+                reply_markup=build_prompt_preview_menu(prompt_id, back_callback="menu:main"),
+            )
+        example_ids = prompt.get("example_file_ids") or []
+        if isinstance(example_ids, list):
+            for fid in example_ids[:3]:
+                if fid:
+                    try:
+                        await callback.message.answer_photo(photo=str(fid))
+                    except Exception:
+                        pass
+        await callback.answer()
 
+    @router.callback_query(F.data.startswith("prompt:generate:"))
+    async def prompt_generate_start_callback(callback: CallbackQuery, state: FSMContext) -> None:
+        """Старт генерации после превью: сбор переменных или сразу генерация."""
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start and enter password first.", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
         template = prompt["template"]
         variables = extract_variables(template)
         await state.clear()
@@ -336,7 +383,6 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             request_username=callback.from_user.username or "",
             request_full_name=callback.from_user.full_name or "",
         )
-
         if prompt["reference_photo_file_id"]:
             try:
                 ref_url = await ctx.telegram_file_url(prompt["reference_photo_file_id"])
@@ -346,7 +392,6 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 await state.update_data(image_urls=image_urls)
             except Exception as e:
                 await callback.message.answer(f"Warning: could not load reference image: {e}")
-
         await callback.answer()
         if not variables:
             await ctx.run_generation(callback.message, state)

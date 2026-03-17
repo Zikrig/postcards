@@ -880,6 +880,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 "type": "image",
             }
         await ctx.repo.update_prompt(prompt_id, prompt["title"], template, var_descriptions, prompt.get("reference_photo_file_id"))
+        desc = (result.get("description") or "").strip()
+        if desc:
+            await ctx.repo.update_prompt_description(prompt_id, desc)
         await callback.message.answer("Final prompt saved. You can activate it or edit further.")
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
@@ -1623,8 +1626,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
@@ -1635,10 +1638,79 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
 
         await state.clear()
         await ctx.show_prompt_edit_actions(callback.message, prompt)
         await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:description:"))
+    async def admin_edit_prompt_description_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+        await state.clear()
+        await state.update_data(editing_prompt_id=prompt_id)
+        await state.set_state(AdminStates.waiting_prompt_edit_description)
+        current = (prompt.get("description") or prompt.get("title") or "").strip()
+        await callback.message.answer(
+            f"📝 Current description: {current or '(empty)'}\nSend new description:"
+        )
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_prompt_edit_description)
+    async def admin_edit_prompt_description_entered(message: Message, state: FSMContext) -> None:
+        if not message.from_user:
+            return
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user:
+            await state.clear()
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        if prompt_id is None:
+            await message.answer("Session expired.")
+            await state.clear()
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await message.answer("Prompt not found.")
+            await state.clear()
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == message.from_user.id
+        if not (is_admin or is_owner):
+            await message.answer("No permission.")
+            await state.clear()
+            return
+        new_desc = (message.text or "").strip()
+        await ctx.repo.update_prompt_description(prompt_id, new_desc or prompt.get("title") or "")
+        await state.clear()
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            await ctx.show_prompt_edit_actions(message, prompt)
+        await message.answer("📝 Description updated.")
 
     @router.callback_query(F.data.startswith("admin:editpart:title:"))
     async def admin_edit_prompt_title_start(callback: CallbackQuery, state: FSMContext) -> None:

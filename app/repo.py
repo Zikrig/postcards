@@ -130,6 +130,17 @@ class Repo:
                 ADD COLUMN IF NOT EXISTS source_prompt_id INTEGER;
                 """
             )
+            await conn.execute(
+                """
+                ALTER TABLE prompts
+                ADD COLUMN IF NOT EXISTS description TEXT;
+                """
+            )
+            await conn.execute(
+                """
+                UPDATE prompts SET description = title WHERE description IS NULL OR description = '';
+                """
+            )
             # Create system tags
             for tag_name in ["Main Menu", "Users"]:
                 tag = await conn.fetchrow("SELECT id FROM tags WHERE name = $1", tag_name)
@@ -335,12 +346,14 @@ class Repo:
         feach_data: Optional[dict[str, Any]] = None,
         owner_tg_id: Optional[int] = None,
         is_public: bool = False,
+        description: Optional[str] = None,
     ) -> int:
+        desc = (description or title).strip() or title
         async with self.pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, is_active, feach_data, owner_tg_id, is_public)
-                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9)
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, is_active, feach_data, owner_tg_id, is_public, description)
+                VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7::jsonb, $8, $9, $10)
                 RETURNING id
                 """,
                 title,
@@ -352,6 +365,7 @@ class Repo:
                 json.dumps(feach_data) if feach_data is not None else None,
                 owner_tg_id,
                 is_public,
+                desc,
             )
             return int(row["id"])
 
@@ -406,6 +420,14 @@ class Repo:
                 prompt_id,
             )
 
+    async def update_prompt_description(self, prompt_id: int, description: str) -> None:
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE prompts SET description = $1 WHERE id = $2",
+                (description or "").strip() or "",
+                prompt_id,
+            )
+
     async def set_prompt_examples(self, prompt_id: int, example_file_ids: list[str]) -> None:
         if len(example_file_ids) > 3:
             example_file_ids = example_file_ids[:3]
@@ -422,10 +444,11 @@ class Repo:
             if not source:
                 raise ValueError("Source prompt not found")
             
+            desc = source.get("description") or source.get("title") or target_title
             row = await conn.fetchrow(
                 """
-                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, feach_data, owner_tg_id, is_public, source_prompt_id)
-                VALUES ($1, $2, $3, $4, $5, $6, NULL, TRUE, $7)
+                INSERT INTO prompts (title, template, variable_descriptions, reference_photo_file_id, created_by, feach_data, owner_tg_id, is_public, source_prompt_id, description)
+                VALUES ($1, $2, $3, $4, $5, $6, NULL, TRUE, $7, $8)
                 RETURNING id
                 """,
                 target_title,
@@ -435,6 +458,7 @@ class Repo:
                 source["created_by"],
                 source["feach_data"],
                 source_id,
+                desc,
             )
             return int(row["id"])
 

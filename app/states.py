@@ -11,6 +11,7 @@ class AdminStates(StatesGroup):
     waiting_prompt_template = State()
     waiting_prompt_edit_title = State()
     waiting_prompt_edit_template = State()
+    waiting_prompt_edit_description = State()
     waiting_prompt_edit_variable_name = State()
     waiting_prompt_edit_variable_description = State()
     waiting_prompt_edit_variable_options = State()
