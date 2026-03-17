@@ -132,11 +132,6 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 caption=desc,
                 reply_markup=markup,
             )
-            for fid in example_ids[1:]:
-                try:
-                    await callback.message.answer_photo(photo=fid)
-                except Exception:
-                    pass
         else:
             await callback.message.edit_text(desc, reply_markup=markup)
         await callback.answer()
@@ -192,11 +187,6 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 caption=desc,
                 reply_markup=markup,
             )
-            for fid in example_ids[1:]:
-                try:
-                    await callback.message.answer_photo(photo=fid)
-                except Exception:
-                    pass
         else:
             await callback.message.edit_text(desc, reply_markup=markup)
         await callback.answer()
@@ -375,12 +365,6 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                     await callback.message.edit_text(desc, reply_markup=markup)
                 except Exception:
                     await callback.message.answer(desc, reply_markup=markup)
-            else:
-                for fid in example_ids[1:]:
-                    try:
-                        await callback.message.answer_photo(photo=fid)
-                    except Exception:
-                        pass
         else:
             try:
                 await callback.message.edit_text(desc, reply_markup=markup)
