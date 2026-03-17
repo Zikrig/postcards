@@ -184,10 +184,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 await message.answer("Not allowed.")
                 return
 
+            tag_ids = await ctx.repo.get_prompt_tag_ids(int(prompt_id))
+            if not is_admin and len(tag_ids) >= 5:
+                await message.answer("Maximum 5 tags allowed for one prompt.")
+                await state.clear()
+                # Optionally return the user to the tags menu here, but state is cleared now.
+                return
+
             tag = await ctx.repo.create_tag(name)
             tag_id = int(tag["id"])
             # Привязываем новый тег к промпту
-            tag_ids = await ctx.repo.get_prompt_tag_ids(int(prompt_id))
             if tag_id not in tag_ids:
                 tag_ids.append(tag_id)
                 await ctx.repo.set_prompt_tags(int(prompt_id), tag_ids)
@@ -434,6 +440,14 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not (is_admin or is_owner):
             await callback.answer("Not allowed", show_alert=True)
             return
+        
+        # Юзер не должен иметь возможность добавить промпту более 5 тегов
+        if not is_admin:
+            tag_ids = await ctx.repo.get_prompt_tag_ids(prompt_id)
+            if len(tag_ids) >= 5:
+                await callback.answer("Maximum 5 tags allowed for one prompt.", show_alert=True)
+                return
+
         # Сохраняем контекст, чтобы после ввода имени тега вернуть пользователя на тот же экран.
         await state.update_data(tag_add_prompt_id=prompt_id, tag_add_page=page, tag_add_is_admin=is_admin)
         await state.set_state(AdminStates.waiting_tag_name)
@@ -469,6 +483,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if tag_id in tag_ids:
             tag_ids.remove(tag_id)
         else:
+            # Юзер не должен иметь возможность добавить промпту более 5 тегов
+            if not is_admin and len(tag_ids) >= 5:
+                await callback.answer("Maximum 5 tags allowed for one prompt.", show_alert=True)
+                return
             tag_ids.append(tag_id)
         await ctx.repo.set_prompt_tags(prompt_id, tag_ids)
         assigned_ids = set(await ctx.repo.get_prompt_tag_ids(prompt_id))
