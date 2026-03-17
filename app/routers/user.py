@@ -1,4 +1,6 @@
 """User flow: prompt selection and generation (variables, run_generation)."""
+import logging
+
 from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -8,6 +10,8 @@ from app.states import AdminStates, GenerateStates
 from app.utils import ensure_dict, extract_variables, variable_token
 
 from .common import RouterCtx
+
+logger = logging.getLogger(__name__)
 
 
 def register_user(router: Router, ctx: RouterCtx) -> None:
