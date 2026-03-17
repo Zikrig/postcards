@@ -219,6 +219,8 @@ class RouterCtx:
                         cb = cb.replace("menu:tag:", "menu:community_tag:")
                     elif cb == "menu:tags":
                         cb = "menu:community_tags:0"
+                    elif cb.startswith("prompt:select:"):
+                        cb = "menu:community_prompt:" + cb.split(":")[-1]
                 new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
             new_rows.append(new_row)
         
@@ -248,6 +250,8 @@ class RouterCtx:
                         cb = cb.replace("menu:tag:", "menu:community_tag:")
                     elif cb == "menu:tags":
                         cb = "menu:community_tags:0"
+                    elif cb.startswith("prompt:select:"):
+                        cb = "menu:community_prompt:" + cb.split(":")[-1]
                 new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
             new_rows.append(new_row)
         

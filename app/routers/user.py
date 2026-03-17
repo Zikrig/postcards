@@ -6,6 +6,7 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+from app.keyboards import build_prompt_feach_menu
 from app.states import AdminStates, GenerateStates
 from app.utils import ensure_dict, extract_variables, variable_token
 
@@ -79,6 +80,91 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         page = int(parts[2]) if len(parts) > 2 else 0
         await callback.answer()
         await ctx.edit_to_user_prompts(callback.message, callback.from_user.id, page=page)
+
+    @router.callback_query(F.data.startswith("menu:my_prompt_item:"))
+    async def my_prompt_item_callback(callback: CallbackQuery) -> None:
+        """Юзерское меню «My prompts»: открыть свой промпт с полным меню (редактирование и т.д.)."""
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        if prompt.get("owner_tg_id") != callback.from_user.id:
+            await callback.answer("Not your prompt", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        template = str(prompt.get("template") or "")
+        idea = feach_data.get("idea", "") if feach_data else ""
+        text = f"Prompt: {prompt['title']}"
+        if idea:
+            text = f"{text}\n\nIdea: {idea}"
+        await callback.message.edit_text(
+            text,
+            reply_markup=build_prompt_feach_menu(
+                prompt_id,
+                feach_data or {},
+                bool(prompt.get("is_active", True)),
+                owner_tg_id=prompt.get("owner_tg_id"),
+                is_public=prompt.get("is_public", False),
+                is_admin_view=False,
+                template=template,
+            ),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("menu:community_prompt:"))
+    async def community_prompt_callback(callback: CallbackQuery) -> None:
+        """Юзерское меню «Community»: карточка промпта без редактирования; Clone только для админа."""
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        if not prompt.get("is_public") or prompt.get("owner_tg_id") is None:
+            await callback.answer("Not available", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        template = str(prompt.get("template") or "")
+        idea = feach_data.get("idea", "") if feach_data else ""
+        text = f"Prompt: {prompt['title']}"
+        if idea:
+            text = f"{text}\n\nIdea: {idea}"
+        is_admin = bool(user.get("is_admin"))
+        await callback.message.edit_text(
+            text,
+            reply_markup=build_prompt_feach_menu(
+                prompt_id,
+                feach_data or {},
+                bool(prompt.get("is_active", True)),
+                owner_tg_id=prompt.get("owner_tg_id"),
+                is_public=prompt.get("is_public", False),
+                is_admin_view=True,
+                template=template,
+                back_callback="menu:community_tags:0",
+                show_clone=is_admin,
+            ),
+        )
+        await callback.answer()
 
     @router.callback_query(F.data == "menu:create_prompt")
     async def create_prompt_callback(callback: CallbackQuery, state: FSMContext) -> None:

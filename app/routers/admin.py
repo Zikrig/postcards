@@ -1509,14 +1509,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
 
-        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        owner_tg_id = prompt.get("owner_tg_id")
+        is_owner = owner_tg_id == callback.from_user.id
         if not (is_admin or is_owner):
             await callback.answer("No permission", show_alert=True)
             return
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        # is_admin / is_owner уже посчитаны выше
+        # Режим admin-view только когда АДМИН смотрит community-промпт (owner_tg_id задан)
+        # Обычный пользователь (не админ), даже если это его собственный промпт, видит полное меню владельца.
+        is_admin_view = bool(is_admin and owner_tg_id is not None)
 
         idea = feach_data.get("idea", "") if feach_data else ""
         template = str(prompt.get("template") or "")
@@ -1532,10 +1535,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     prompt_id,
                     feach_data or {},
                     is_active,
-                    owner_tg_id=prompt.get("owner_tg_id"),
+                    owner_tg_id=owner_tg_id,
                     is_public=prompt.get("is_public", False),
-                    # В админ-режиме всегда показываем admin-view для любых user/community промптов
-                    is_admin_view=True,
+                    is_admin_view=is_admin_view,
                     template=template,
                 ),
             )
@@ -1546,9 +1548,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     prompt_id,
                     feach_data or {},
                     is_active,
-                    owner_tg_id=prompt.get("owner_tg_id"),
+                    owner_tg_id=owner_tg_id,
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=True,
+                    is_admin_view=is_admin_view,
                     template=template,
                 ),
             )

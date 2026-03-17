@@ -118,7 +118,8 @@ def build_user_prompts_menu(
         is_public = p.get("is_public", False)
         emoji = "🟢" if is_public else "🔒"
         label = f"{emoji} {p['title']}"
-        cb = f"admin:pw:item:{p['id']}"
+        # Юзерское меню "My prompts" → свой пункт (полное меню с редактированием); админ-панель → admin:pw:item
+        cb = f"menu:my_prompt_item:{p['id']}" if not is_admin_view else f"admin:pw:item:{p['id']}"
         buttons.append([InlineKeyboardButton(text=btn_label(label, 20), callback_data=cb)])
     
     if is_admin_view and owner_tg_id:
@@ -267,6 +268,8 @@ def build_prompt_feach_menu(
     is_public: bool = False,
     is_admin_view: bool = False,
     template: str = "",
+    back_callback: Optional[str] = None,
+    show_clone: Optional[bool] = None,
 ) -> InlineKeyboardMarkup:
     features = feach_data.get("features") or {}
     rows = []
@@ -318,13 +321,15 @@ def build_prompt_feach_menu(
         
         rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
 
-    if is_admin_view and not is_draft: # Clone also only if not draft
+    if (show_clone if show_clone is not None else is_admin_view) and not is_draft:
         rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
 
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     
-    # Navigation back based on context
-    if is_admin_view and owner_tg_id:
+    # Navigation back
+    if back_callback is not None:
+        back_cb = back_callback
+    elif is_admin_view and owner_tg_id:
         back_cb = "admin:pw:users:0"
     elif owner_tg_id:
         back_cb = "menu:my_prompts:0"
