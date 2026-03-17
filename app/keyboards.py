@@ -397,7 +397,9 @@ def build_feature_config_menu(
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Don't specify", callback_data=f"admin:featdel:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
-    rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:pw:item:{prompt_id}")])
+    # Back: владелец возвращается в свою карточку (My prompts), админ — в admin:pw:item.
+    back_cb = f"menu:my_prompt_item:{prompt_id}"
+    rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
