@@ -1534,7 +1534,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin and not is_owner,
+                    # В админ-режиме всегда показываем admin-view для любых user/community промптов
+                    is_admin_view=True,
                     template=template,
                 ),
             )
@@ -1547,7 +1548,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin and not is_owner,
+                    is_admin_view=True,
                     template=template,
                 ),
             )
