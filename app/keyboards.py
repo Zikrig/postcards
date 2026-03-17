@@ -34,8 +34,8 @@ def build_main_menu(main_menu_prompts: list[asyncpg.Record]) -> InlineKeyboardMa
         ]
         for p in main_menu_prompts
     ]
-    buttons.append([InlineKeyboardButton(text="👤 My prompts", callback_data="menu:my_prompts:0")])
-    buttons.append([InlineKeyboardButton(text="✨ Generate", callback_data="menu:tags")])
+    buttons.append([InlineKeyboardButton(text="✨ All postcards", callback_data="menu:tags")])
+    buttons.append([InlineKeyboardButton(text="👤 My postcards", callback_data="menu:my_prompts:0")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
