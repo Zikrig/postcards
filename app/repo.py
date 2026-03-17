@@ -456,6 +456,36 @@ class Repo:
             )
             return list(rows), total
 
+    async def list_community_tags_paginated(
+        self, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        """
+        Tags actually used by public user prompts (community prompts).
+        Excludes tags that are never attached to any active public user prompt.
+        """
+        async with self.pool.acquire() as conn:
+            base_where = """
+                FROM tags t
+                INNER JOIN prompt_tags pt ON pt.tag_id = t.id
+                INNER JOIN prompts p ON p.id = pt.prompt_id
+                WHERE p.owner_tg_id IS NOT NULL
+                  AND p.is_public = TRUE
+                  AND p.is_active = TRUE
+            """
+            total_sql = f"SELECT COUNT(DISTINCT t.id) {base_where}"
+            total = await conn.fetchval(total_sql)
+            total = int(total or 0)
+
+            offset = max(0, page) * per_page
+            rows_sql = f"""
+                SELECT DISTINCT t.*
+                {base_where}
+                ORDER BY t.name
+                LIMIT $1 OFFSET $2
+            """
+            rows = await conn.fetch(rows_sql, per_page, offset)
+            return list(rows), total
+
     async def get_tag_by_id(self, tag_id: int) -> Optional[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             return await conn.fetchrow("SELECT * FROM tags WHERE id = $1", tag_id)

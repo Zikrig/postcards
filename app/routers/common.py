@@ -175,7 +175,7 @@ class RouterCtx:
             await self.show_admin_users_list(message, page)
 
     async def show_community_tags(self, message: Message, page: int = 0) -> None:
-        tags, total = await self.repo.list_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        tags, total = await self.repo.list_community_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
         await message.answer(
             "Choose a community category:",
             reply_markup=build_community_tags_menu(tags, page=page, total=total),
@@ -183,7 +183,7 @@ class RouterCtx:
 
     async def edit_to_community_tags(self, message: Message, page: int = 0) -> None:
         logger.info(f"edit_to_community_tags: page={page}")
-        tags, total = await self.repo.list_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        tags, total = await self.repo.list_community_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
         logger.info(f"Found {len(tags)} tags, total={total}")
         try:
             await message.edit_text(
