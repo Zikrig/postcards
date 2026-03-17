@@ -1,4 +1,5 @@
 """User flow: prompt selection and generation (variables, run_generation)."""
+import json
 import logging
 
 from aiogram import F, Router
@@ -106,9 +107,16 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
-        example_ids = prompt.get("example_file_ids") or []
-        if isinstance(example_ids, list):
-            example_ids = [str(f) for f in example_ids[:3] if f]
+        raw_examples = prompt.get("example_file_ids") or []
+        # Нормализуем: может быть list или JSON-строка
+        if isinstance(raw_examples, str):
+            try:
+                raw_examples = json.loads(raw_examples) if raw_examples else []
+            except json.JSONDecodeError:
+                raw_examples = []
+        if not isinstance(raw_examples, list):
+            raw_examples = []
+        example_ids = [str(f) for f in raw_examples[:3] if f]
         markup = build_prompt_feach_menu(
             prompt_id,
             feach_data or {},
@@ -158,9 +166,15 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
         is_admin = bool(user.get("is_admin"))
-        example_ids = prompt.get("example_file_ids") or []
-        if isinstance(example_ids, list):
-            example_ids = [str(f) for f in example_ids[:3] if f]
+        raw_examples = prompt.get("example_file_ids") or []
+        if isinstance(raw_examples, str):
+            try:
+                raw_examples = json.loads(raw_examples) if raw_examples else []
+            except json.JSONDecodeError:
+                raw_examples = []
+        if not isinstance(raw_examples, list):
+            raw_examples = []
+        example_ids = [str(f) for f in raw_examples[:3] if f]
         markup = build_prompt_feach_menu(
             prompt_id,
             feach_data or {},
@@ -338,9 +352,15 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Prompt not found", show_alert=True)
             return
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or str(prompt.get("title", ""))
-        example_ids = prompt.get("example_file_ids") or []
-        if isinstance(example_ids, list):
-            example_ids = [str(f) for f in example_ids[:3] if f]
+        raw_examples = prompt.get("example_file_ids") or []
+        if isinstance(raw_examples, str):
+            try:
+                raw_examples = json.loads(raw_examples) if raw_examples else []
+            except json.JSONDecodeError:
+                raw_examples = []
+        if not isinstance(raw_examples, list):
+            raw_examples = []
+        example_ids = [str(f) for f in raw_examples[:3] if f]
         markup = build_prompt_preview_menu(prompt_id, back_callback="menu:main")
         if example_ids:
             try:
