@@ -290,6 +290,43 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         await state.clear()
         await message.answer("Greeting has been updated.")
 
+    @router.callback_query(F.data == "admin:initial_tokens")
+    async def admin_initial_tokens_menu(callback: CallbackQuery, state: FSMContext) -> None:
+        """Entry point to set initial tokens for new users."""
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        await state.clear()
+        current = await ctx.repo.get_initial_tokens()
+        await callback.message.answer(
+            f"Current initial tokens: {current}\n\n"
+            "Enter NEW amount of tokens for new users:"
+        )
+        await state.set_state(AdminStates.waiting_initial_tokens)
+        await callback.answer()
+
+    @router.message(AdminStates.waiting_initial_tokens)
+    async def admin_initial_tokens_entered(message: Message, state: FSMContext) -> None:
+        """Save new initial tokens amount."""
+        user = await ctx.repo.get_user(message.from_user.id)
+        if not user or not user["is_admin"]:
+            return
+        try:
+            amount = int((message.text or "").strip())
+            if amount < 0:
+                await message.answer("Amount must be non-negative.")
+                return
+        except ValueError:
+            await message.answer("Please enter a valid number.")
+            return
+
+        await ctx.repo.set_initial_tokens(amount)
+        await state.clear()
+        await message.answer(f"Initial tokens set to: {amount}", reply_markup=build_admin_menu())
+
     @router.callback_query(F.data.startswith("admin:tag:item:"))
     async def admin_tag_item(callback: CallbackQuery) -> None:
         if not callback.message:

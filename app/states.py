@@ -34,6 +34,7 @@ class AdminStates(StatesGroup):
     waiting_greeting_message = State()
     waiting_new_variable_name = State()
     waiting_new_variable_type = State()
+    waiting_initial_tokens = State()
 
 
 class GenerateStates(StatesGroup):

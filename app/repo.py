@@ -163,6 +163,9 @@ class Repo:
         is_admin: bool,
     ) -> asyncpg.Record:
         async with self.pool.acquire() as conn:
+            # Check if user exists before upsert
+            existing = await conn.fetchrow("SELECT id FROM users WHERE tg_id = $1", tg_id)
+            
             row = await conn.fetchrow(
                 """
                 INSERT INTO users (tg_id, username, full_name, is_authorized, is_admin)
@@ -180,6 +183,19 @@ class Repo:
                 is_admin,
                 is_admin,
             )
+            
+            # If new user, award initial tokens
+            if not existing:
+                initial_tokens = await self.get_initial_tokens()
+                if initial_tokens > 0:
+                    await conn.execute(
+                        "UPDATE users SET balance_tokens = balance_tokens + $1 WHERE tg_id = $2",
+                        initial_tokens,
+                        tg_id,
+                    )
+                    # Refresh row to include new balance
+                    row = await conn.fetchrow("SELECT * FROM users WHERE tg_id = $1", tg_id)
+            
             return row
 
     async def get_user(self, tg_id: int) -> Optional[asyncpg.Record]:
@@ -657,6 +673,35 @@ class Repo:
                 """,
                 "greeting",
                 json.dumps(payload),
+            )
+
+    async def get_initial_tokens(self) -> int:
+        """Returns initial tokens for new users (defaults to 5)."""
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", "initial_tokens")
+            if not row:
+                return 5
+            try:
+                data = row["value"]
+                if isinstance(data, dict):
+                    return int(data.get("amount", 5))
+                if isinstance(data, (int, str)):
+                    return int(data)
+                return 5
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return 5
+
+    async def set_initial_tokens(self, amount: int) -> None:
+        """Sets initial tokens for new users."""
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO settings (key, value)
+                VALUES ($1, $2)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                "initial_tokens",
+                json.dumps({"amount": amount}),
             )
 
     async def list_prompts_with_tag(self, tag_id: int, active_only: bool = True) -> list[asyncpg.Record]:

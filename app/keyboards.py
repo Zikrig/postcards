@@ -151,6 +151,7 @@ def build_admin_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Tags", callback_data="admin:tags")],
             [InlineKeyboardButton(text="Promo codes", callback_data="admin:promo_menu")],
             [InlineKeyboardButton(text="Greeting", callback_data="admin:greeting")],
+            [InlineKeyboardButton(text="Initial tokens", callback_data="admin:initial_tokens")],
         ]
     )
 
