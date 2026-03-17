@@ -312,6 +312,7 @@ def build_prompt_feach_menu(
             test_label = "1 🪙 Test" if owner_tg_id else "Test"
             rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
             rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+            rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
             # В юзерском меню (owner_tg_id задан) не показываем Deactivate/Activate,
             # чтобы не дублировать управление доступностью с Make Public/Make Private.
             if owner_tg_id is None:
@@ -402,7 +403,6 @@ def build_prompt_edit_menu(prompt_id: int, back_callback: str = "admin:pw:list")
             [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
-            [InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")],
             [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
