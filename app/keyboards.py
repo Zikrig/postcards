@@ -399,17 +399,34 @@ def build_prompt_edit_tags_menu(
     total: int = 0,
 ) -> InlineKeyboardMarkup:
     """All tags with 🟢 (assigned) / 🔴 (not assigned); click toggles; pagination 20 per page."""
-    rows = []
+    rows: list[list[InlineKeyboardButton]] = []
+
+    # Сначала — специальный тег "Main Menu" (если есть)
+    main_menu_rows: list[list[InlineKeyboardButton]] = []
+    other_rows: list[list[InlineKeyboardButton]] = []
+
     for t in tags:
+        name_raw = str(t.get("name") or "")
+        # Тег "Users" нельзя выбирать при редактировании промпта
+        if name_raw == "Users":
+            continue
         tid = int(t["id"])
-        name = btn_label(str(t["name"]), 18)
+        name = btn_label(name_raw, 18)
         emoji = "🟢" if tid in assigned_ids else "🔴"
-        rows.append([
+        row = [
             InlineKeyboardButton(
                 text=f"{emoji} {name}",
                 callback_data=f"admin:editpart:tag_toggle:{prompt_id}:{tid}:{page}",
             )
-        ])
+        ]
+        if name_raw == "Main Menu":
+            main_menu_rows.append(row)
+        else:
+            other_rows.append(row)
+
+    # Main Menu сверху, затем остальные теги в исходном порядке
+    rows.extend(main_menu_rows)
+    rows.extend(other_rows)
     rows.extend(
         _pagination_buttons(page, total, f"admin:editpart:tags:{prompt_id}", f"admin:pw:item:{prompt_id}")
     )
