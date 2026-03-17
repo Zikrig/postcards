@@ -105,6 +105,32 @@ def build_prompts_by_tag_menu(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def build_community_prompts_admin_menu(
+    prompts: list[asyncpg.Record], tag_id: int, page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """
+    Community prompts list for admin view:
+    - Each prompt opens admin prompt item actions (admin:pw:item:{id})
+    - Pagination/back stays in community navigation.
+    """
+    buttons: list[list[InlineKeyboardButton]] = []
+    for p in prompts:
+        label = btn_label(str(p["title"]), 20)
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=label,
+                    callback_data=f"admin:pw:item:{p['id']}",
+                )
+            ]
+        )
+    # Keep community navigation (same paging/back as user view)
+    buttons.extend(
+        _pagination_buttons(page, total, f"menu:community_tag:{tag_id}", "menu:community_tags:0")
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def build_user_prompts_menu(
     prompts: list[asyncpg.Record], page: int = 0, total: int = 0, is_admin_view: bool = False, owner_tg_id: Optional[int] = None
 ) -> InlineKeyboardMarkup:

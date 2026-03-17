@@ -20,6 +20,7 @@ from app.keyboards import (
     build_user_prompts_menu,
     build_admin_users_with_prompts_menu,
     build_community_tags_menu,
+    build_community_prompts_admin_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -205,24 +206,30 @@ class RouterCtx:
             name = tag["name"] if tag else str(tag_id)
         
         text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
-        from app.keyboards import build_prompts_by_tag_menu
-        markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
-        
-        # Create a new markup with replaced callback data because buttons are immutable
-        new_rows = []
-        for row in markup.inline_keyboard:
-            new_row = []
-            for btn in row:
-                cb = btn.callback_data
-                if cb:
-                    if cb.startswith("menu:tag:"):
-                        cb = cb.replace("menu:tag:", "menu:community_tag:")
-                    elif cb == "menu:tags":
-                        cb = "menu:community_tags:0"
-                new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
-            new_rows.append(new_row)
-        
-        await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=new_rows))
+
+        # Admins see admin community list (opens admin prompt actions), others see user list
+        is_admin = message.from_user and (message.from_user.id in self.settings.admin_ids)
+        if is_admin:
+            markup = build_community_prompts_admin_menu(prompts, tag_id, page=page, total=total)
+        else:
+            from app.keyboards import build_prompts_by_tag_menu
+            markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
+            # Fix callbacks for community navigation (user view)
+            new_rows: list[list[InlineKeyboardButton]] = []
+            for row in markup.inline_keyboard:
+                new_row: list[InlineKeyboardButton] = []
+                for btn in row:
+                    cb = btn.callback_data
+                    if cb:
+                        if cb.startswith("menu:tag:"):
+                            cb = cb.replace("menu:tag:", "menu:community_tag:")
+                        elif cb == "menu:tags":
+                            cb = "menu:community_tags:0"
+                    new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
+                new_rows.append(new_row)
+            markup = InlineKeyboardMarkup(inline_keyboard=new_rows)
+
+        await message.answer(text, reply_markup=markup)
 
     async def edit_to_community_prompts(self, message: Message, tag_id: int, page: int = 0) -> None:
         logger.info(f"edit_to_community_prompts: tag={tag_id}, page={page}")
@@ -235,24 +242,29 @@ class RouterCtx:
             name = tag["name"] if tag else str(tag_id)
         
         text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
-        from app.keyboards import build_prompts_by_tag_menu
-        markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
-        
-        new_rows = []
-        for row in markup.inline_keyboard:
-            new_row = []
-            for btn in row:
-                cb = btn.callback_data
-                if cb:
-                    if cb.startswith("menu:tag:"):
-                        cb = cb.replace("menu:tag:", "menu:community_tag:")
-                    elif cb == "menu:tags":
-                        cb = "menu:community_tags:0"
-                new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
-            new_rows.append(new_row)
-        
+
+        is_admin = message.from_user and (message.from_user.id in self.settings.admin_ids)
+        if is_admin:
+            markup = build_community_prompts_admin_menu(prompts, tag_id, page=page, total=total)
+        else:
+            from app.keyboards import build_prompts_by_tag_menu
+            markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
+            new_rows: list[list[InlineKeyboardButton]] = []
+            for row in markup.inline_keyboard:
+                new_row: list[InlineKeyboardButton] = []
+                for btn in row:
+                    cb = btn.callback_data
+                    if cb:
+                        if cb.startswith("menu:tag:"):
+                            cb = cb.replace("menu:tag:", "menu:community_tag:")
+                        elif cb == "menu:tags":
+                            cb = "menu:community_tags:0"
+                    new_row.append(InlineKeyboardButton(text=btn.text, callback_data=cb))
+                new_rows.append(new_row)
+            markup = InlineKeyboardMarkup(inline_keyboard=new_rows)
+
         try:
-            await message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=new_rows))
+            await message.edit_text(text, reply_markup=markup)
         except TelegramBadRequest as e:
             logger.warning(f"edit_to_community_prompts edit failed: {e}")
             await self.show_community_prompts(message, tag_id, page)
