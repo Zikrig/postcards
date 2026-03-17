@@ -315,7 +315,17 @@ class RouterCtx:
           - False → юзерский флоу (Back to list → menu:my_prompts:0)
           - None  → autodetect по prompt.owner_tg_id и user.is_admin (вызывающий код может пробросить явно)
         """
-        reference_text = "set" if prompt["reference_photo_file_id"] else "not set"
+        ref_id = prompt.get("reference_photo_file_id")
+        examples = prompt.get("example_file_ids")
+        logger.info(
+            "show_prompt_edit_actions: prompt_id=%s title=%r ref_id=%r examples=%r is_admin_view=%r",
+            prompt.get("id"),
+            prompt.get("title"),
+            ref_id,
+            examples,
+            is_admin_view,
+        )
+        reference_text = "set" if ref_id else "not set"
         back_cb = "admin:pw:list"
         # Если явно передали, уважаем
         if is_admin_view is False:

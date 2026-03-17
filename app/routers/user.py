@@ -159,6 +159,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         except ValueError:
             await callback.answer("Invalid prompt", show_alert=True)
             return
+        logger.info("community_prompt_callback: prompt_id=%s", prompt_id)
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
@@ -166,6 +167,15 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not prompt.get("is_public") or prompt.get("owner_tg_id") is None:
             await callback.answer("Not available", show_alert=True)
             return
+        logger.info(
+            "community_prompt_callback: loaded prompt id=%s title=%r ref_id=%r examples_raw=%r is_public=%r owner_tg_id=%r",
+            prompt.get("id"),
+            prompt.get("title"),
+            prompt.get("reference_photo_file_id"),
+            prompt.get("example_file_ids"),
+            prompt.get("is_public"),
+            prompt.get("owner_tg_id"),
+        )
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]

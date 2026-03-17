@@ -451,6 +451,17 @@ class Repo:
                 raise ValueError("Source prompt not found")
             
             desc = source.get("description") or source.get("title") or target_title
+            # Log source prompt important fields for debugging cloning behaviour
+            import logging
+            logging.getLogger(__name__).info(
+                "clone_prompt: source_id=%s title=%r ref_id=%r examples=%r is_public=%r is_active=%r",
+                source.get("id"),
+                source.get("title"),
+                source.get("reference_photo_file_id"),
+                source.get("example_file_ids"),
+                source.get("is_public"),
+                source.get("is_active"),
+            )
             # Normalize examples to JSON string
             examples_raw = source.get("example_file_ids")
             if isinstance(examples_raw, str):
