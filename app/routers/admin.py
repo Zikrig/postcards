@@ -2329,10 +2329,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer()
             return
 
-        # 1) Обновляем feach_data.features (то, что видно в карточке промпта)
+        # 1) Обновляем feach_data.features (то, что видно в карточке промпта).
+        #    Шаблон (template) НЕ трогаем — токен владелец добавляет вручную
+        #    через "Change template", чтобы не появлялись скрытые переменные.
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
-        token = f"<{name}>" if vtype == "text" else f"[{name}]"
         features[name] = {
             "varname": name,
             "type": vtype,
@@ -2342,25 +2343,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         }
         feach_data["features"] = features
         await ctx.repo.update_prompt_feach_data(int(prompt_id), feach_data)
-
-        # 2) Синхронизируем шаблон (добавляем токен, если его нет)
-        template = str(prompt.get("template") or "")
-        if token not in template:
-            if template and not template.endswith("\n"):
-                template = template + " "
-            template = template + token
-        variables = extract_variables(template)
-        descriptions = ctx.normalize_variable_descriptions_for_template(
-            prompt.get("variable_descriptions") or {},
-            variables,
-        )
-        await ctx.repo.update_prompt(
-            prompt_id=int(prompt_id),
-            title=prompt["title"],
-            template=template,
-            variable_descriptions=descriptions,
-            reference_photo_file_id=prompt["reference_photo_file_id"],
-        )
 
         await state.clear()
 
@@ -2372,7 +2354,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         feach_data = ensure_dict(updated.get("feach_data") or {})
         is_active = bool(updated.get("is_active", True))
-        template = str(updated.get("template") or "")
         desc = (updated.get("description") or updated.get("title") or "").strip() or updated["title"]
 
         raw_examples = updated.get("example_file_ids") or []
@@ -2397,7 +2378,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             owner_tg_id=updated.get("owner_tg_id"),
             is_public=updated.get("is_public", False),
             is_admin_view=is_admin_view,
-            template=template,
+            template=str(updated.get("template") or ""),
         )
 
         try:
