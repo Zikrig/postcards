@@ -103,6 +103,29 @@ def normalize_feach_for_storage(api_feach: dict[str, Any]) -> dict[str, Any]:
             "my_own": feat.get("my_own", True),
             "custom": list(feat.get("custom") or []),
         }
+
+    # Ensure character_position is present (explicitly requested)
+    # We check both by key and by varname
+    has_char_pos = any(
+        (f.get("varname") or k).upper().replace(" ", "_") == "CHARACTER_POSITION"
+        for k, f in out_features.items()
+    )
+    if not has_char_pos:
+        out_features["character_position"] = {
+            "varname": "CHARACTER_POSITION",
+            "about": "Position or pose of the main character",
+            "options": {
+                "facing_camera": {"text": "facing the camera", "enabled": True},
+                "back_to_camera": {"text": "back to camera", "enabled": True},
+                "looking_left": {"text": "looking left", "enabled": True},
+                "looking_right": {"text": "looking right", "enabled": True},
+                "profile_view": {"text": "profile view", "enabled": True},
+                "in_dialogue": {"text": "in dialogue with someone", "enabled": True},
+            },
+            "my_own": True,
+            "custom": [],
+        }
+
     return {"idea": idea, "features": out_features}
 
 

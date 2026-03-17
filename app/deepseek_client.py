@@ -22,9 +22,11 @@ RULES:
 
 2) "features" (object): Between 5 and 8 feature keys. One key MUST be "style". The rest can be "feature1", "feature2", "feature3", etc.
 
-   For "style": suggest 3–5 visual styles (e.g. documentary, anime, horror, photorealistic). In "about" briefly explain what this variable controls, in English.
+    For "style": suggest 3–5 visual styles (e.g. documentary, anime, horror, photorealistic). In "about" briefly explain what this variable controls, in English.
 
-   Do NOT add a feature for "who is in the photo" or "person/character" with text options (e.g. "I", "my friend"). The person in the scene is always the user's reference photo ([USER_PHOTO]), not a variable choice.
+    One key SHOULD be "character_position" if there's a character in the scene. Suggest 4–6 options for the pose or position of the character (e.g. "facing the camera", "back to camera", "profile view", "looking left", "sitting on a bench"). In "about" briefly explain what this variable controls, in English.
+
+    Do NOT add a feature for "who is in the photo" or "person/character" with text options (e.g. "I", "my friend"). The person in the scene is always the user's reference photo ([USER_PHOTO]), not a variable choice.
 
    For each other feature: think of concrete variable aspects of the scene (e.g. what the astronaut plants, what is in the sky, background object). Each feature has:
    - "varname": short Latin/keyboard-friendly name for the variable (e.g. FLAG_OBJECT, SKY_CONTENT).

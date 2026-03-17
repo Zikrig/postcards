@@ -1061,21 +1061,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 "allow_custom": False,
                 "about": "Reference photo of the person to integrate into the scene",
             },
-            {
-                "name": "CHARACTER_POSITION",
-                "type": "text",
-                "constant": None,
-                "options": [
-                    "facing the camera",
-                    "back to camera",
-                    "looking left",
-                    "looking right",
-                    "profile view",
-                    "in dialogue with someone",
-                ],
-                "allow_custom": True,
-                "about": "Position or pose of the main character (the person from the reference photo)",
-            },
         ]
         for feat_key, feat in features.items():
             varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
@@ -1859,9 +1844,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        # Режим admin-view только когда АДМИН смотрит community-промпт (owner_tg_id задан)
-        # Обычный пользователь (не админ), даже если это его собственный промпт, видит полное меню владельца.
-        is_admin_view = bool(is_admin and owner_tg_id is not None)
+        # Режим admin-view только когда АДМИН смотрит ЧУЖОЙ community-промпт
+        # Если админ смотрит свой собственный промпт, он должен видеть полное меню владельца.
+        is_admin_view = bool(is_admin and owner_tg_id is not None and not is_owner)
 
         idea = feach_data.get("idea", "") if feach_data else ""
         template = str(prompt.get("template") or "")
