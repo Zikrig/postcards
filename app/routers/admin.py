@@ -827,8 +827,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        logging.info("admin_final_prompt: data=%r, user_tg_id=%s, user_record=%r", callback.data, callback.from_user.id, user)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         if not ctx.deepseek:
             await callback.answer("DeepSeek not available", show_alert=True)
@@ -841,6 +842,19 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        logging.info(
+            "admin_final_prompt: prompt_id=%s, owner_tg_id=%s, is_admin=%s, is_owner=%s",
+            prompt_id,
+            prompt.get("owner_tg_id"),
+            is_admin,
+            is_owner,
+        )
+        if not (is_admin or is_owner):
+            logging.warning("admin_final_prompt: no permission, answering Not allowed")
+            await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
