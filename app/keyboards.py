@@ -116,6 +116,7 @@ def build_prompt_list_menu(
 def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
+        [InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")],
         [InlineKeyboardButton(
             text="Deactivate" if is_active else "Activate",
             callback_data=f"admin:active:{prompt_id}",
@@ -199,7 +200,6 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
             [InlineKeyboardButton(text="Edit variables", callback_data=f"admin:editpart:variables:{prompt_id}")],
-            [InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")],
             [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
@@ -229,7 +229,7 @@ def build_prompt_edit_tags_menu(
             )
         ])
     rows.extend(
-        _pagination_buttons(page, total, f"admin:editpart:tags:{prompt_id}", f"admin:edit:{prompt_id}")
+        _pagination_buttons(page, total, f"admin:editpart:tags:{prompt_id}", f"admin:pw:item:{prompt_id}")
     )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
