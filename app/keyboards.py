@@ -1,5 +1,5 @@
 """Inline keyboard builders for menus."""
-from typing import Any
+from typing import Any, Optional
 
 import asyncpg
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
