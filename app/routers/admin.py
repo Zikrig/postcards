@@ -2174,8 +2174,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
     @router.callback_query(F.data.startswith("admin:editvar:add:"))
     async def admin_add_variable_start(callback: CallbackQuery, state: FSMContext) -> None:
         """
-        Start flow to add a new variable into the template.
-        Works both for first-time edit and later edits.
+        Start flow to add a new variable for a prompt.
+        Новая переменная:
+        - появляется в feach_data["features"] (список параметров в карточке промпта)
+        - синхронизируется с шаблоном (добавляется токен в template)
         """
         if not callback.message:
             return
@@ -2274,51 +2276,79 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not name or any(ch for ch in name if not (ch.isalnum() or ch == "_")):
             await message.answer("Invalid name. Use only letters, numbers and underscores. Try again:")
             return
-        # Load current template and variables
+        # Проверяем, что такой фичи/переменной ещё нет
         prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
         if not prompt:
             await state.clear()
             await message.answer("Prompt not found.")
             return
-        template = prompt["template"]
-        variables = extract_variables(template)
-        if any(v.get("name") == name for v in variables):
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if name in features:
             await message.answer("Variable with this name already exists. Enter another name:")
             return
         await state.update_data(new_variable_name=name)
         await state.set_state(AdminStates.waiting_new_variable_type)
-        await message.answer("Choose variable type: send 'text' or 'image'.")
+        # Предлагаем выбрать тип переменной инлайн-кнопками
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Text", callback_data="admin:newvar:type:text"),
+                    InlineKeyboardButton(text="Image", callback_data="admin:newvar:type:image"),
+                ]
+            ]
+        )
+        await message.answer("Choose variable type:", reply_markup=kb)
 
-    @router.message(AdminStates.waiting_new_variable_type)
-    async def admin_new_variable_type_entered(message: Message, state: FSMContext) -> None:
-        user = await ctx.repo.get_user(message.from_user.id)
+    @router.callback_query(AdminStates.waiting_new_variable_type, F.data.startswith("admin:newvar:type:"))
+    async def admin_new_variable_type_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
         if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         data = await state.get_data()
         prompt_id = data.get("editing_prompt_id")
         name = data.get("new_variable_name")
         if prompt_id is None or not name:
             await state.clear()
-            await message.answer("Prompt edit session expired. Open edit menu again.")
+            await callback.message.answer("Prompt edit session expired. Open edit menu again.")
+            await callback.answer()
             return
-        vtype_raw = (message.text or "").strip().lower()
+        vtype_raw = (callback.data or "").split(":")[-1].lower()
         if vtype_raw not in {"text", "image"}:
-            await message.answer("Type must be 'text' or 'image'. Try again:")
+            await callback.answer("Invalid type", show_alert=True)
             return
         vtype = vtype_raw
         # Insert token into template at the end (admin потом может переставить вручную)
         prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
         if not prompt:
             await state.clear()
-            await message.answer("Prompt not found.")
+            await callback.message.answer("Prompt not found.")
+            await callback.answer()
             return
-        template = str(prompt.get("template") or "")
+
+        # 1) Обновляем feach_data.features (то, что видно в карточке промпта)
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
         token = f"<{name}>" if vtype == "text" else f"[{name}]"
+        features[name] = {
+            "varname": name,
+            "type": vtype,
+            "options": [],
+            "custom": [],
+            "my_own": True,
+        }
+        feach_data["features"] = features
+        await ctx.repo.update_prompt_feach_data(int(prompt_id), feach_data)
+
+        # 2) Синхронизируем шаблон (добавляем токен, если его нет)
+        template = str(prompt.get("template") or "")
         if token not in template:
             if template and not template.endswith("\n"):
                 template = template + " "
             template = template + token
-        # Re-extract variables and normalize descriptions
         variables = extract_variables(template)
         descriptions = ctx.normalize_variable_descriptions_for_template(
             prompt.get("variable_descriptions") or {},
@@ -2331,17 +2361,59 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             variable_descriptions=descriptions,
             reference_photo_file_id=prompt["reference_photo_file_id"],
         )
-        await state.update_data(
-            prompt_title=prompt["title"],
-            prompt_template=template,
-            prompt_variables=variables,
-            variable_descriptions=descriptions,
-            reference_photo_file_id=prompt["reference_photo_file_id"],
+
+        await state.clear()
+
+        # 3) Перерисовываем карточку промпта в том же стиле, что и при обычном открытии
+        updated = await ctx.repo.get_prompt_by_id(int(prompt_id))
+        if not updated:
+            await callback.message.answer("Variable added, but prompt reload failed.")
+            await callback.answer()
+            return
+        feach_data = ensure_dict(updated.get("feach_data") or {})
+        is_active = bool(updated.get("is_active", True))
+        template = str(updated.get("template") or "")
+        desc = (updated.get("description") or updated.get("title") or "").strip() or updated["title"]
+
+        raw_examples = updated.get("example_file_ids") or []
+        if isinstance(raw_examples, str):
+            try:
+                raw_examples = json.loads(raw_examples) if raw_examples else []
+            except json.JSONDecodeError:
+                raw_examples = []
+        if not isinstance(raw_examples, list):
+            raw_examples = []
+        example_ids = [str(f) for f in raw_examples[:3] if f]
+
+        # Определяем, это владелец промпта или админ
+        is_admin = bool(user.get("is_admin"))
+        is_owner = updated.get("owner_tg_id") == callback.from_user.id
+        is_admin_view = bool(is_admin and not is_owner)
+
+        markup = build_prompt_feach_menu(
+            int(prompt_id),
+            feach_data or {},
+            is_active,
+            owner_tg_id=updated.get("owner_tg_id"),
+            is_public=updated.get("is_public", False),
+            is_admin_view=is_admin_view,
+            template=template,
         )
-        await state.set_state(None)
-        await message.answer(f"Variable {token} added to template.")
-        # Показать обновлённый список переменных
-        await ctx.show_variable_pick_menu(message, state)
+
+        try:
+            if example_ids:
+                # Если карточка была с фото, шлём новую
+                await callback.message.answer_photo(
+                    photo=example_ids[0],
+                    caption=desc,
+                    reply_markup=markup,
+                )
+            else:
+                await callback.message.edit_text(desc, reply_markup=markup)
+        except TelegramBadRequest:
+            await callback.message.answer(desc, reply_markup=markup)
+
+        await callback.answer("Variable added")
 
     @router.callback_query(F.data.startswith("admin:editvar:field:name:"))
     async def admin_edit_variable_name_start(callback: CallbackQuery, state: FSMContext) -> None:
