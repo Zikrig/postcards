@@ -291,13 +291,42 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 await ctx.repo.set_prompt_tags(prompt_id, [users_tag["id"]])
 
             await msg.delete()
-            await message.answer(
-                f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance})."
-            )
-            # Сразу открываем меню редактирования для только что созданного промпта (юзерский флоу)
+            # Сразу открываем карточку с фичами (как в My prompts),
+            # чтобы юзер увидел параметры, Generate final и т.п.
             prompt = await ctx.repo.get_prompt_by_id(prompt_id)
             if prompt:
-                await ctx.show_prompt_edit_actions(message, prompt, is_admin_view=False)
+                feach_data = ensure_dict(prompt.get("feach_data") or {})
+                template = str(prompt.get("template") or "")
+                desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
+                raw_examples = prompt.get("example_file_ids") or []
+                if isinstance(raw_examples, str):
+                    try:
+                        raw_examples = json.loads(raw_examples) if raw_examples else []
+                    except json.JSONDecodeError:
+                        raw_examples = []
+                if not isinstance(raw_examples, list):
+                    raw_examples = []
+                example_ids = [str(f) for f in raw_examples[:3] if f]
+                markup = build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data or {},
+                    bool(prompt.get("is_active", True)),
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=False,
+                    template=template,
+                )
+                await message.answer(
+                    f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance})."
+                )
+                if example_ids:
+                    await message.answer_photo(
+                        photo=example_ids[0],
+                        caption=desc,
+                        reply_markup=markup,
+                    )
+                else:
+                    await message.answer(desc, reply_markup=markup)
         except Exception as e:
             await message.answer(f"Error refining idea: {e}")
         finally:

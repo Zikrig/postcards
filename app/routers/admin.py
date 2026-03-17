@@ -561,6 +561,9 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
         template = str(prompt.get("template") or "")
+        # Если обычный пользователь редактирует СВОЙ промпт, показываем юзерское меню,
+        # чтобы Back вёл в его My prompts, а не в админку.
+        view_as_admin = bool(is_admin and not is_owner)
         if feach_data.get("features"):
             idea = feach_data.get("idea", "")
             try:
@@ -572,7 +575,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=True,
+                        is_admin_view=view_as_admin,
                         template=template,
                     ),
                 )
@@ -585,7 +588,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=True,
+                        is_admin_view=view_as_admin,
                         template=template,
                     ),
                 )
@@ -599,7 +602,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=True,
+                        is_admin_view=view_as_admin,
                         template=template,
                     ),
                 )
@@ -612,7 +615,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=True,
+                        is_admin_view=view_as_admin,
                         template=template,
                     ),
                 )
