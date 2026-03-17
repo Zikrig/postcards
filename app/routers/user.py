@@ -45,7 +45,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Please use /start first.", show_alert=True)
             return
         await callback.answer()
-        await callback.message.answer("Enter a title for your new prompt (2 🪙 will be charged):")
+        await callback.message.answer("Enter a title for your new prompt:")
         from app.states import AdminStates
         await state.set_state(AdminStates.waiting_user_prompt_title)
 
@@ -58,6 +58,26 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not title:
             return
         
+        await state.update_data(user_prompt_title=title)
+        await state.set_state(AdminStates.waiting_user_prompt_idea)
+        await message.answer(f"Title: {title}\nNow enter the main idea for your image (2 🪙 will be charged):")
+
+    @router.message(AdminStates.waiting_user_prompt_idea)
+    async def user_prompt_idea_handler(message: Message, state: FSMContext) -> None:
+        user = await ctx.ensure_user(message)
+        if not user["is_authorized"]:
+            return
+        idea = (message.text or "").strip()
+        if not idea:
+            return
+        
+        data = await state.get_data()
+        title = data.get("user_prompt_title")
+        if not title:
+            await message.answer("Session expired. Please start over.")
+            await state.clear()
+            return
+
         # Charge 2 tokens
         new_balance = await ctx.repo.consume_tokens(message.from_user.id, 2)
         if new_balance is None:
@@ -66,25 +86,82 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await state.clear()
             return
 
-        # Create prompt
-        prompt_id = await ctx.repo.insert_prompt(
-            title=title,
-            template="Your prompt template here",
-            variable_descriptions={},
-            reference_photo_file_id=None,
-            created_by=message.from_user.id,
-            owner_tg_id=message.from_user.id,
-            is_public=False
-        )
-        
-        # Add 'Users' tag
-        users_tag = await ctx.repo.get_tag_by_name("Users")
-        if users_tag:
-            await ctx.repo.set_prompt_tags(prompt_id, [users_tag["id"]])
+        if not ctx.deepseek:
+            await message.answer("Error: AI client unavailable.")
+            await state.clear()
+            return
 
-        await message.answer(f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance}).\nYou can now edit it in 'My prompts'.")
-        await state.clear()
-        await ctx.show_user_prompts(message, message.from_user.id)
+        try:
+            msg = await message.answer("Calling AI to refine your idea…")
+            from app.utils import normalize_feach_for_storage
+            api_feach = await ctx.deepseek.refine_idea(idea)
+            normalized = normalize_feach_for_storage(api_feach)
+            
+            # Create prompt
+            prompt_id = await ctx.repo.insert_prompt(
+                title=title,
+                template=idea, # Using idea as draft template
+                variable_descriptions={},
+                reference_photo_file_id=None,
+                created_by=message.from_user.id,
+                owner_tg_id=message.from_user.id,
+                is_public=False,
+                feach_data=normalized,
+            )
+            
+            # Add 'Users' tag
+            users_tag = await ctx.repo.get_tag_by_name("Users")
+            if users_tag:
+                await ctx.repo.set_prompt_tags(prompt_id, [users_tag["id"]])
+
+            await msg.delete()
+            await message.answer(
+                f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance}).\n"
+                "Now you need to generate the final template in 'My prompts'."
+            )
+        except Exception as e:
+            await message.answer(f"Error refining idea: {e}")
+        finally:
+            await state.clear()
+            await ctx.show_user_prompts(message, message.from_user.id)
+
+    @router.callback_query(F.data.startswith("menu:community_tags"))
+    async def community_tags_callback(callback: CallbackQuery, ctx: RouterCtx) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        data = (callback.data or "").strip()
+        page = 0
+        if data.startswith("menu:community_tags:"):
+            try:
+                page = int(data.split(":")[-1])
+            except ValueError:
+                pass
+        await callback.answer()
+        await ctx.edit_to_community_tags(callback.message, page=page)
+
+    @router.callback_query(F.data.startswith("menu:community_tag:"))
+    async def community_tag_callback(callback: CallbackQuery, ctx: RouterCtx) -> None:
+        if not callback.message:
+            return
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        data = (callback.data or "").strip()
+        parts = data.split(":")
+        if len(parts) < 3:
+            return
+        try:
+            tag_id = int(parts[2])
+            page = int(parts[3]) if len(parts) > 3 else 0
+        except ValueError:
+            return
+        await callback.answer()
+        await ctx.edit_to_community_prompts(callback.message, tag_id, page=page)
 
     @router.callback_query(F.data.startswith("menu:tags"))
     async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
@@ -102,6 +179,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             except ValueError:
                 pass
         await callback.answer()
+        # Tags menu only shows ADMIN categories and Community button
         await ctx.edit_to_tags_menu(callback.message, page=page)
 
     @router.callback_query(F.data.startswith("menu:tag:"))

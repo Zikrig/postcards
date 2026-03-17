@@ -1482,7 +1482,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
+        is_admin = callback.from_user.id in ctx.settings.admin_ids
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+
         idea = feach_data.get("idea", "") if feach_data else ""
+        template = str(prompt.get("template") or "")
         text = f"Prompt: {prompt['title']}"
         if idea:
             text = f"{text}\n\nIdea: {idea}"
@@ -1498,6 +1502,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
+                    template=template,
                 ),
             )
         except TelegramBadRequest:
@@ -1510,6 +1515,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
                     is_admin_view=is_admin and not is_owner,
+                    template=template,
                 ),
             )
         await callback.answer()
@@ -2521,7 +2527,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
-        parts = (callback.data or "").split(":")
+        data = (callback.data or "").strip()
+        parts = data.split(":")
         page = int(parts[3]) if len(parts) > 3 else 0
         await callback.answer()
         await ctx.edit_to_admin_users_list(callback.message, page=page)

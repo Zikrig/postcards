@@ -46,13 +46,13 @@ def build_tags_menu(
     buttons: list[list[InlineKeyboardButton]] = []
     # Special virtual tag "All" – always first, not stored in DB
     buttons.append(
-        [InlineKeyboardButton(text="All", callback_data="menu:tag:0")]
+        [InlineKeyboardButton(text="All (System)", callback_data="menu:tag:0")]
     )
-    # User's own prompts shortcut
+    # Community prompts (Public user prompts)
     buttons.append(
-        [InlineKeyboardButton(text="Users (My prompts)", callback_data="menu:my_prompts:0")]
+        [InlineKeyboardButton(text="👥 Community (Users)", callback_data="menu:community_tags:0")]
     )
-    # All real tags except "Main Menu" (оно только для главного меню, не как категория)
+    # All real tags except "Main Menu" and "Users"
     buttons.extend(
         [
             [
@@ -66,6 +66,25 @@ def build_tags_menu(
         ]
     )
     buttons.extend(_pagination_buttons(page, total, "menu:tags", "menu:main"))
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_community_tags_menu(
+    tags: list[asyncpg.Record], page: int = 0, total: int = 0
+) -> InlineKeyboardMarkup:
+    """Categories specifically for user-generated public prompts."""
+    buttons: list[list[InlineKeyboardButton]] = []
+    buttons.append(
+        [InlineKeyboardButton(text="All Community Prompts", callback_data="menu:community_tag:0")]
+    )
+    for t in tags:
+        name = str(t.get("name") or "")
+        if name in ["Main Menu", "Users"]:
+            continue
+        buttons.append([
+            InlineKeyboardButton(text=btn_label(name, 24), callback_data=f"menu:community_tag:{t['id']}")
+        ])
+    buttons.extend(_pagination_buttons(page, total, "menu:community_tags", "menu:tags"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -247,22 +266,41 @@ def build_prompt_feach_menu(
     owner_tg_id: Optional[int] = None,
     is_public: bool = False,
     is_admin_view: bool = False,
+    template: str = "",
 ) -> InlineKeyboardMarkup:
     features = feach_data.get("features") or {}
     rows = []
+    
+    draft_idea = feach_data.get("idea", "")
+    is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here")
+
     for feat_key, feat in features.items():
         label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
         rows.append([
             InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
         ])
+    
+    # Generate final is ALWAYS available
     rows.append([
-        InlineKeyboardButton(text="Generate final", callback_data=f"admin:final:{prompt_id}"),
+        InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}"),
     ])
-    rows.append([
-        InlineKeyboardButton(text="🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
-    ])
+
+    if not is_draft:
+        # These buttons only if NOT draft
+        test_label = "1 🪙 Test" if owner_tg_id else "Test"
+        rows.append([
+            InlineKeyboardButton(text=f"🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
+        ])
+        rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
+        rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+        rows.append([
+            InlineKeyboardButton(
+                text="Deactivate" if is_active else "Activate",
+                callback_data=f"admin:active:{prompt_id}",
+            ),
+        ])
+
     rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
     
     if is_admin_view:
         rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
@@ -272,19 +310,18 @@ def build_prompt_feach_menu(
         label = "🔒 Make Private" if is_public else "🟢 Make Public"
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
 
-    rows.append([
-        InlineKeyboardButton(
-            text="Deactivate" if is_active else "Activate",
-            callback_data=f"admin:active:{prompt_id}",
-        ),
-    ])
     rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
     
     # Navigation back based on context
-    back_cb = "admin:pw:users:0" if is_admin_view and owner_tg_id else "admin:pw:list"
-    rows.append([InlineKeyboardButton(text="Back to list", callback_data=back_cb)])
+    if is_admin_view and owner_tg_id:
+        back_cb = "admin:pw:users:0"
+    elif owner_tg_id:
+        back_cb = "menu:my_prompts:0"
+    else:
+        back_cb = "admin:pw:list"
+        
+    rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

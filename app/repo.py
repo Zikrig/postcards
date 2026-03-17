@@ -268,6 +268,36 @@ class Repo:
             )
             return list(rows), total
 
+    async def list_public_user_prompts_paginated(
+        self, tag_id: Optional[int] = None, page: int = 0, per_page: int = 20
+    ) -> tuple[list[asyncpg.Record], int]:
+        """List all public user prompts, optionally filtered by tag."""
+        async with self.pool.acquire() as conn:
+            where_clauses = ["p.owner_tg_id IS NOT NULL", "p.is_public = TRUE", "p.is_active = TRUE"]
+            args = []
+            if tag_id and tag_id > 0:
+                where_clauses.append("pt.tag_id = $1")
+                args.append(tag_id)
+            
+            where = " WHERE " + " AND ".join(where_clauses)
+            
+            from_sql = "FROM prompts p"
+            if tag_id and tag_id > 0:
+                from_sql += " INNER JOIN prompt_tags pt ON pt.prompt_id = p.id"
+            
+            total = await conn.fetchval(f"SELECT COUNT(*) {from_sql} {where}", *args)
+            total = int(total or 0)
+            
+            offset = max(0, page) * per_page
+            sql = f"""
+                SELECT p.* {from_sql}
+                {where}
+                ORDER BY p.id DESC
+                LIMIT ${len(args)+1} OFFSET ${len(args)+2}
+            """
+            rows = await conn.fetch(sql, *args, per_page, offset)
+            return list(rows), total
+
     async def list_users_with_prompts_paginated(
         self, page: int = 0, per_page: int = 20
     ) -> tuple[list[asyncpg.Record], int]:

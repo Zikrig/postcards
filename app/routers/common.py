@@ -19,6 +19,7 @@ from app.keyboards import (
     build_tags_menu,
     build_user_prompts_menu,
     build_admin_users_with_prompts_menu,
+    build_community_tags_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -172,6 +173,69 @@ class RouterCtx:
             )
         except TelegramBadRequest:
             await self.show_admin_users_list(message, page)
+
+    async def show_community_tags(self, message: Message, page: int = 0) -> None:
+        tags, total = await self.repo.list_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        await message.answer(
+            "Choose a community category:",
+            reply_markup=build_community_tags_menu(tags, page=page, total=total),
+        )
+
+    async def edit_to_community_tags(self, message: Message, page: int = 0) -> None:
+        tags, total = await self.repo.list_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
+        try:
+            await message.edit_text(
+                "Choose a community category:",
+                reply_markup=build_community_tags_menu(tags, page=page, total=total),
+            )
+        except TelegramBadRequest:
+            await self.show_community_tags(message, page)
+
+    async def show_community_prompts(self, message: Message, tag_id: int, page: int = 0) -> None:
+        prompts, total = await self.repo.list_public_user_prompts_paginated(tag_id=tag_id, page=page, per_page=self.repo.PAGE_SIZE)
+        if tag_id == 0:
+            name = "All Community"
+        else:
+            tag = await self.repo.get_tag_by_id(tag_id)
+            name = tag["name"] if tag else str(tag_id)
+        
+        text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
+        # Reuse build_prompts_by_tag_menu but change base_cb
+        # Actually, let's create a specific one to avoid back-path confusion
+        from app.keyboards import build_prompts_by_tag_menu
+        markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
+        # Fix base_cb and back_cb in markup
+        for row in markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("menu:tag:"):
+                    btn.callback_data = btn.callback_data.replace("menu:tag:", "menu:community_tag:")
+                if btn.callback_data == "menu:tags":
+                    btn.callback_data = "menu:community_tags:0"
+        
+        await message.answer(text, reply_markup=markup)
+
+    async def edit_to_community_prompts(self, message: Message, tag_id: int, page: int = 0) -> None:
+        prompts, total = await self.repo.list_public_user_prompts_paginated(tag_id=tag_id, page=page, per_page=self.repo.PAGE_SIZE)
+        if tag_id == 0:
+            name = "All Community"
+        else:
+            tag = await self.repo.get_tag_by_id(tag_id)
+            name = tag["name"] if tag else str(tag_id)
+        
+        text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
+        from app.keyboards import build_prompts_by_tag_menu
+        markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
+        for row in markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data and btn.callback_data.startswith("menu:tag:"):
+                    btn.callback_data = btn.callback_data.replace("menu:tag:", "menu:community_tag:")
+                if btn.callback_data == "menu:tags":
+                    btn.callback_data = "menu:community_tags:0"
+        
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except TelegramBadRequest:
+            await self.show_community_prompts(message, tag_id, page)
 
     def get_variable_config(
         self,
