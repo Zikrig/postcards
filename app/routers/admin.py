@@ -1893,8 +1893,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         parts = (callback.data or "").split(":")
         if len(parts) < 6:
@@ -1930,6 +1930,15 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             )
             await state.set_state(None)
 
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
         await ctx.show_variable_actions_menu(callback.message, state, var_idx)
         await callback.answer()
 
@@ -1938,8 +1947,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         parts = (callback.data or "").split(":")
         if len(parts) < 7:
@@ -1949,6 +1958,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             var_idx = int(parts[6])
         except ValueError:
             await callback.answer("Invalid variable action", show_alert=True)
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id) if prompt_id is not None else None
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await state.update_data(edit_var_idx=var_idx)
         await state.set_state(AdminStates.waiting_prompt_edit_variable_name)
@@ -1963,8 +1983,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         parts = (callback.data or "").split(":")
         if len(parts) < 7:
@@ -1974,6 +1994,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             var_idx = int(parts[6])
         except ValueError:
             await callback.answer("Invalid variable action", show_alert=True)
+            return
+        data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id) if prompt_id is not None else None
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
             return
         await state.update_data(edit_var_idx=var_idx)
         await state.set_state(AdminStates.waiting_prompt_edit_variable_description)
@@ -1988,8 +2019,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         parts = (callback.data or "").split(":")
         if len(parts) < 7:
@@ -2001,6 +2032,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Invalid variable action", show_alert=True)
             return
         data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id) if prompt_id is not None else None
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         if var_idx < 0 or var_idx >= len(variables):
             await callback.answer("Variable not found", show_alert=True)
@@ -2021,8 +2062,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
             return
         parts = (callback.data or "").split(":")
         if len(parts) < 7:
@@ -2035,6 +2076,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         allow_custom = parts[6] == "yes"
         data = await state.get_data()
+        prompt_id = data.get("editing_prompt_id")
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id) if prompt_id is not None else None
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
         variables: list[dict[str, str]] = data.get("prompt_variables", [])
         if var_idx < 0 or var_idx >= len(variables):
             await callback.answer("Variable not found", show_alert=True)
