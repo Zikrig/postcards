@@ -484,6 +484,7 @@ def build_prompt_edit_variable_actions_menu(
     prompt_id: int,
     var_idx: int,
     variable: dict[str, str],
+    is_owner_view: bool = False,
 ) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="Rename variable", callback_data=f"admin:editvar:field:name:{prompt_id}:{var_idx}")],
@@ -499,7 +500,10 @@ def build_prompt_edit_variable_actions_menu(
                 InlineKeyboardButton(text="My own: OFF", callback_data=f"admin:editvar:allow:{prompt_id}:{var_idx}:no"),
             ]
         )
-    rows.append([InlineKeyboardButton(text="Back to variables", callback_data=f"admin:editpart:variables:{prompt_id}")])
+    # Для владельца промпта Back ведёт в карточку промпта (My prompts),
+    # для чисто админского режима — в список переменных/промптов.
+    back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner_view else f"admin:editpart:variables:{prompt_id}"
+    rows.append([InlineKeyboardButton(text="Back to variables", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -394,9 +394,14 @@ class RouterCtx:
         )
         if var["type"] == "text":
             details += f"Options: {', '.join(options) if options else '(none)'}\nMy own: {'ON' if allow_custom else 'OFF'}"
+        # Владелец промпта (user или admin) должен возвращаться в свою карточку,
+        # а не в админский список.
+        prompt = await self.repo.get_prompt_by_id(int(prompt_id))
+        owner_tg_id = prompt.get("owner_tg_id") if prompt else None
+        is_owner_view = owner_tg_id == message.from_user.id if owner_tg_id is not None else False
         await message.answer(
             details,
-            reply_markup=build_prompt_edit_variable_actions_menu(int(prompt_id), var_idx, var),
+            reply_markup=build_prompt_edit_variable_actions_menu(int(prompt_id), var_idx, var, is_owner_view=is_owner_view),
         )
 
     def build_text_options_keyboard(self, options: list[str], allow_custom: bool) -> InlineKeyboardMarkup:
