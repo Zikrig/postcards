@@ -309,9 +309,9 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
                 page = int(data.split(":")[-1])
             except ValueError:
                 pass
+        # Основная кнопка Tags теперь ведёт в систему тегов Community, а не в админские теги
         await callback.answer()
-        # Tags menu only shows ADMIN categories and Community button
-        await ctx.edit_to_tags_menu(callback.message, page=page)
+        await ctx.edit_to_community_tags(callback.message, page=page)
 
     @router.callback_query(F.data.startswith("menu:tag:"))
     async def menu_tag_callback(callback: CallbackQuery, state: FSMContext) -> None:

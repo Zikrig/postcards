@@ -856,6 +856,12 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             logging.warning("admin_final_prompt: no permission, answering Not allowed")
             await callback.answer("Not allowed", show_alert=True)
             return
+        # Быстро закрываем callback, чтобы не ловить timeout от Telegram
+        try:
+            await callback.answer()
+        except TelegramBadRequest:
+            # Если уже закрыт/просрочен – игнорируем
+            pass
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
         idea = feach_data.get("idea", "")
@@ -951,6 +957,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             template = str(prompt.get("template") or "")
+            is_admin = bool(user.get("is_admin"))
+            is_owner = prompt.get("owner_tg_id") == callback.from_user.id
             await callback.message.answer(
                 f"Template: {template[:300]}…" if len(template) > 300 else f"Template: {template}",
                 reply_markup=build_prompt_feach_menu(
@@ -959,11 +967,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     bool(prompt.get("is_active", True)),
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=True,
+                    is_admin_view=is_admin and not is_owner,
                     template=template,
                 ),
             )
-        await callback.answer()
 
     def _swap_test_button_label(markup: InlineKeyboardMarkup, prompt_id: int, label: str) -> InlineKeyboardMarkup:
         prefix = f"admin:test:{prompt_id}"
