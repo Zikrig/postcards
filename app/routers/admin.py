@@ -535,7 +535,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=True,
                         template=template,
                     ),
                 )
@@ -548,7 +548,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=True,
                         template=template,
                     ),
                 )
@@ -562,7 +562,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=True,
                         template=template,
                     ),
                 )
@@ -575,7 +575,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                         is_active,
                         owner_tg_id=prompt.get("owner_tg_id"),
                         is_public=prompt.get("is_public", False),
-                        is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                        is_admin_view=True,
                         template=template,
                     ),
                 )
@@ -893,7 +893,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     bool(prompt.get("is_active", True)),
                     owner_tg_id=prompt.get("owner_tg_id"),
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=callback.from_user.id in ctx.settings.admin_ids and prompt.get("owner_tg_id") != callback.from_user.id,
+                    is_admin_view=True,
                     template=template,
                 ),
             )
