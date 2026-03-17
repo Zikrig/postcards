@@ -387,9 +387,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -403,6 +400,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
@@ -429,9 +431,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 6:
             await callback.answer("Invalid", show_alert=True)
@@ -447,6 +446,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
@@ -492,9 +496,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -508,6 +509,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
@@ -586,9 +592,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
@@ -602,6 +605,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
@@ -920,9 +928,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -931,6 +936,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
 
         async def answer_callback_soon() -> None:
@@ -1042,9 +1052,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -1058,6 +1065,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         current = prompt.get("example_file_ids") or []
         if not isinstance(current, list):
@@ -1090,9 +1102,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except ValueError:
@@ -1101,6 +1110,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
             return
         new_active = not bool(prompt.get("is_active", True))
         await ctx.repo.set_prompt_active(prompt_id, new_active)
@@ -1149,9 +1163,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
         logging.info("admin_export_prompt: callback.data=%r", callback.data)
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             try:
                 prompt_id = int((callback.data or "").split(":")[-1])
@@ -1164,6 +1175,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             if not prompt:
                 logging.warning("admin_export_prompt: prompt %s not found", prompt_id)
                 await callback.answer("Prompt not found", show_alert=True)
+                return
+            is_admin = bool(user and user.get("is_admin"))
+            is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+            if not (is_admin or is_owner):
+                await callback.answer("Not allowed", show_alert=True)
                 return
             payload = build_prompt_export_payload(prompt)
             logging.info("admin_export_prompt: payload built for prompt_id=%s (title=%r)", prompt_id, payload["title"])

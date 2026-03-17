@@ -283,176 +283,59 @@ def build_prompt_feach_menu(
 ) -> InlineKeyboardMarkup:
     features = feach_data.get("features") or {}
     rows = []
-
+    
     draft_idea = feach_data.get("idea", "")
-    is_draft = (
-        template == draft_idea
-        or (not template)
-        or (template == "Your prompt template here")
-        or ("[" not in template and "<" not in template)
-    )
+    is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here") or ("[" not in template and "<" not in template)
 
     is_community_admin = is_admin_view and owner_tg_id is not None
-    is_owner_view = owner_tg_id is not None and not is_admin_view
 
-    # Feature configuration buttons:
-    # - shown for real admin views
-    # - hidden for normal user "My prompts" so их меню не забивается нерабочими админ-кнопками
-    if not is_community_admin and not is_owner_view:
+    if not is_community_admin:
         for feat_key, feat in features.items():
-            label = btn_label(
-                str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
-                18,
-            )
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text=f"🔹 {label}",
-                        callback_data=f"admin:feach:{prompt_id}:{feat_key}",
-                    ),
-                ]
-            )
-
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="🪄 Generate final template",
-                    callback_data=f"admin:final:{prompt_id}",
-                ),
-            ]
-        )
+            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+            rows.append([
+                InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+            ])
+        
+        # Generate final is only for non-community admin view
+        rows.append([
+            InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}"),
+        ])
 
     if not is_draft:
         # These buttons only if NOT draft
         if not is_community_admin:
-            if is_owner_view:
-                # User's own prompt (My prompts): простое и полностью рабочее меню
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="🚀 Generate (1 🪙)",
-                            callback_data=f"prompt:select:{prompt_id}",
-                        ),
-                    ]
-                )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="📝 Edit prompt",
-                            callback_data=f"admin:edit:{prompt_id}",
-                        ),
-                    ]
-                )
-                label = "🔒 Make Private" if is_public else "🟢 Make Public"
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=label,
-                            callback_data=f"admin:toggle_public:{prompt_id}",
-                        )
-                    ]
-                )
-            else:
-                # Admin view (system prompts or community admin tools)
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="🚀 Generate (1 🪙)",
-                            callback_data=f"prompt:select:{prompt_id}",
-                        ),
-                    ]
-                )
-                test_label = "1 🪙 Test" if owner_tg_id else "Test"
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text=test_label,
-                            callback_data=f"admin:test:{prompt_id}",
-                        )
-                    ]
-                )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="Tags",
-                            callback_data=f"admin:editpart:tags:{prompt_id}",
-                        )
-                    ]
-                )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="Deactivate" if is_active else "Activate",
-                            callback_data=f"admin:active:{prompt_id}",
-                        ),
-                    ]
-                )
-                rows.append(
-                    [
-                        InlineKeyboardButton(
-                            text="Edit",
-                            callback_data=f"admin:edit:{prompt_id}",
-                        )
-                    ]
-                )
+            rows.append([
+                InlineKeyboardButton(text=f"🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
+            ])
+            test_label = "1 🪙 Test" if owner_tg_id else "Test"
+            rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
+            rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+            rows.append([
+                InlineKeyboardButton(
+                    text="Deactivate" if is_active else "Activate",
+                    callback_data=f"admin:active:{prompt_id}",
+                ),
+            ])
+            rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
 
-                if owner_tg_id is not None:
-                    # Toggle public/private for user prompts (admin view)
-                    label = "🔒 Make Private" if is_public else "🟢 Make Public"
-                    rows.append(
-                        [
-                            InlineKeyboardButton(
-                                text=label,
-                                callback_data=f"admin:toggle_public:{prompt_id}",
-                            )
-                        ]
-                    )
+            if owner_tg_id is not None:
+                # Toggle public/private for user prompts
+                label = "🔒 Make Private" if is_public else "🟢 Make Public"
+                rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
         else:
             # Community admin view: only Test (Free) and Generate (Free)
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text="🚀 Generate (Free)",
-                        callback_data=f"prompt:select:{prompt_id}",
-                    ),
-                ]
-            )
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text="Test (Free)",
-                        callback_data=f"admin:test:{prompt_id}",
-                    )
-                ]
-            )
-
-        # Export / Clone / Delete — только для админов
-        if is_admin_view:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text="Export JSON",
-                        callback_data=f"admin:export:{prompt_id}",
-                    )
-                ]
-            )
+            rows.append([
+                InlineKeyboardButton(text="🚀 Generate (Free)", callback_data=f"prompt:select:{prompt_id}"),
+            ])
+            rows.append([InlineKeyboardButton(text="Test (Free)", callback_data=f"admin:test:{prompt_id}")])
+        
+        rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
 
     if (show_clone if show_clone is not None else is_admin_view) and not is_draft:
-        if is_admin_view:
-            rows.append(
-                [
-                    InlineKeyboardButton(
-                        text="Clone to All (System)",
-                        callback_data=f"admin:clone:{prompt_id}",
-                    )
-                ]
-            )
+        rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
 
-    if is_admin_view:
-        rows.append(
-            [InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")]
-        )
-
+    rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
+    
     # Navigation back
     if back_callback is not None:
         back_cb = back_callback
