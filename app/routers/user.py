@@ -23,6 +23,46 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         await state.clear()
         await ctx.edit_to_main_menu(callback.message)
 
+    @router.callback_query(F.data.startswith("menu:community_tags"))
+    async def community_tags_callback(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        await callback.answer()
+        logger.info(f"Community tags callback hit: {callback.data}")
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.message.answer("Please use /start first.", show_alert=True)
+            return
+        data = (callback.data or "").strip()
+        page = 0
+        if data.startswith("menu:community_tags:"):
+            try:
+                page = int(data.split(":")[-1])
+            except ValueError:
+                pass
+        await ctx.edit_to_community_tags(callback.message, page=page)
+
+    @router.callback_query(F.data.startswith("menu:community_tag:"))
+    async def community_tag_callback(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        await callback.answer()
+        logger.info(f"Community tag callback hit: {callback.data}")
+        user = await ctx.ensure_user_from_tg(callback.from_user)
+        if not user["is_authorized"]:
+            await callback.answer("Please use /start first.", show_alert=True)
+            return
+        data = (callback.data or "").strip()
+        parts = data.split(":")
+        if len(parts) < 3:
+            return
+        try:
+            tag_id = int(parts[2])
+            page = int(parts[3]) if len(parts) > 3 else 0
+        except ValueError:
+            return
+        await ctx.edit_to_community_prompts(callback.message, tag_id, page=page)
+
     @router.callback_query(F.data.startswith("menu:my_prompts:"))
     async def my_prompts_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
@@ -127,48 +167,11 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await state.clear()
             await ctx.show_user_prompts(message, message.from_user.id)
 
-    @router.callback_query(F.data.startswith("menu:community_tags"))
-    async def community_tags_callback(callback: CallbackQuery, ctx: RouterCtx) -> None:
-        if not callback.message:
-            return
-        user = await ctx.ensure_user_from_tg(callback.from_user)
-        if not user["is_authorized"]:
-            await callback.answer("Please use /start first.", show_alert=True)
-            return
-        data = (callback.data or "").strip()
-        page = 0
-        if data.startswith("menu:community_tags:"):
-            try:
-                page = int(data.split(":")[-1])
-            except ValueError:
-                pass
-        await callback.answer()
-        await ctx.edit_to_community_tags(callback.message, page=page)
-
-    @router.callback_query(F.data.startswith("menu:community_tag:"))
-    async def community_tag_callback(callback: CallbackQuery, ctx: RouterCtx) -> None:
-        if not callback.message:
-            return
-        user = await ctx.ensure_user_from_tg(callback.from_user)
-        if not user["is_authorized"]:
-            await callback.answer("Please use /start first.", show_alert=True)
-            return
-        data = (callback.data or "").strip()
-        parts = data.split(":")
-        if len(parts) < 3:
-            return
-        try:
-            tag_id = int(parts[2])
-            page = int(parts[3]) if len(parts) > 3 else 0
-        except ValueError:
-            return
-        await callback.answer()
-        await ctx.edit_to_community_prompts(callback.message, tag_id, page=page)
-
     @router.callback_query(F.data.startswith("menu:tags"))
     async def menu_tags_callback(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
             return
+        logger.info(f"Menu tags callback hit: {callback.data}")
         user = await ctx.ensure_user_from_tg(callback.from_user)
         if not user["is_authorized"]:
             await callback.answer("Please use /start first.", show_alert=True)

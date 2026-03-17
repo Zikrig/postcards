@@ -274,37 +274,47 @@ def build_prompt_feach_menu(
     draft_idea = feach_data.get("idea", "")
     is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here") or ("[" not in template and "<" not in template)
 
-    for feat_key, feat in features.items():
-        label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+    is_community_admin = is_admin_view and owner_tg_id is not None
+
+    if not is_community_admin:
+        for feat_key, feat in features.items():
+            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+            rows.append([
+                InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+            ])
+        
+        # Generate final is only for non-community admin view
         rows.append([
-            InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}"),
+            InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}"),
         ])
-    
-    # Generate final is ALWAYS available
-    rows.append([
-        InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}"),
-    ])
 
     if not is_draft:
         # These buttons only if NOT draft
-        test_label = "1 🪙 Test" if owner_tg_id else "Test"
-        rows.append([
-            InlineKeyboardButton(text=f"🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
-        ])
-        rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-        rows.append([
-            InlineKeyboardButton(
-                text="Deactivate" if is_active else "Activate",
-                callback_data=f"admin:active:{prompt_id}",
-            ),
-        ])
-        rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
+        if not is_community_admin:
+            rows.append([
+                InlineKeyboardButton(text=f"🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
+            ])
+            test_label = "1 🪙 Test" if owner_tg_id else "Test"
+            rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
+            rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+            rows.append([
+                InlineKeyboardButton(
+                    text="Deactivate" if is_active else "Activate",
+                    callback_data=f"admin:active:{prompt_id}",
+                ),
+            ])
+            rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
 
-        if owner_tg_id is not None:
-            # Toggle public/private for user prompts
-            label = "🔒 Make Private" if is_public else "🟢 Make Public"
-            rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
+            if owner_tg_id is not None:
+                # Toggle public/private for user prompts
+                label = "🔒 Make Private" if is_public else "🟢 Make Public"
+                rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:toggle_public:{prompt_id}")])
+        else:
+            # Community admin view: only Test (Free) and Generate (Free)
+            rows.append([
+                InlineKeyboardButton(text="🚀 Generate (Free)", callback_data=f"prompt:select:{prompt_id}"),
+            ])
+            rows.append([InlineKeyboardButton(text="Test (Free)", callback_data=f"admin:test:{prompt_id}")])
         
         rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
 

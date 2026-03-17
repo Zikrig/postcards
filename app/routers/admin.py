@@ -971,13 +971,24 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         )
         image_urls: list[str] = [_test_image_url]
         # Charge for test: 1 token for anyone (user testing own prompt, or admin testing)
+        # BUT: For admins testing community prompts, it's free as requested
         user_tg_id = callback.from_user.id
-        new_balance = await ctx.repo.consume_tokens(user_tg_id, 1)
+        is_community_test = (prompt.get("owner_tg_id") is not None and prompt.get("owner_tg_id") != user_tg_id)
+
+        if is_community_test:
+            new_balance = await ctx.repo.get_user_balance(user_tg_id)
+        else:
+            new_balance = await ctx.repo.consume_tokens(user_tg_id, 1)
+
         if new_balance is None:
             balance = await ctx.repo.get_user_balance(user_tg_id)
             await callback.message.answer(f"Not enough balance for test (1 🪙 needed). Your balance: {balance}")
             return
-        progress_msg = await callback.message.answer(f"Test generation started (1 🪙 deducted, Balance: {new_balance})…")
+
+        msg_text = f"Test generation started (Balance: {new_balance})…"
+        if not is_community_test:
+            msg_text = f"Test generation started (1 🪙 deducted, Balance: {new_balance})…"
+        progress_msg = await callback.message.answer(msg_text)
         try:
             task_id = await ctx.evo.create_task(final_prompt, image_urls=image_urls)
 
