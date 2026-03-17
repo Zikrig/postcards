@@ -372,7 +372,13 @@ class Repo:
     async def update_prompt_public(self, prompt_id: int, is_public: bool) -> None:
         async with self.pool.acquire() as conn:
             await conn.execute(
-                "UPDATE prompts SET is_public = $1 WHERE id = $2",
+                """
+                UPDATE prompts
+                SET is_public = $1,
+                    -- Если делаем промпт публичным, автоматически включаем его
+                    is_active = CASE WHEN $1 THEN TRUE ELSE is_active END
+                WHERE id = $2
+                """,
                 is_public,
                 prompt_id,
             )

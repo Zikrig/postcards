@@ -307,14 +307,25 @@ class RouterCtx:
             normalized[token] = cfg
         return normalized
 
-    async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record) -> None:
+    async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:
+        """
+        Показывает меню редактирования промпта.
+        is_admin_view:
+          - True  → админский флоу (Back to list → admin:pw:list)
+          - False → юзерский флоу (Back to list → menu:my_prompts:0)
+          - None  → autodetect по prompt.owner_tg_id и user.is_admin (вызывающий код может пробросить явно)
+        """
         reference_text = "set" if prompt["reference_photo_file_id"] else "not set"
+        back_cb = "admin:pw:list"
+        # Если явно передали, уважаем
+        if is_admin_view is False:
+            back_cb = "menu:my_prompts:0"
         await message.answer(
             "Prompt edit menu:\n"
             f"Title: {prompt['title']}\n"
             f"Reference image: {reference_text}\n"
             "Choose what to change:",
-            reply_markup=build_prompt_edit_menu(int(prompt["id"])),
+            reply_markup=build_prompt_edit_menu(int(prompt["id"]), back_callback=back_cb),
         )
 
     async def persist_prompt_edit_state(self, state: FSMContext) -> Optional[asyncpg.Record]:

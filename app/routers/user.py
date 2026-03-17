@@ -284,10 +284,10 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             await message.answer(
                 f"Prompt '{title}' created! 2 🪙 deducted (Balance: {new_balance})."
             )
-            # Сразу открываем меню редактирования для только что созданного промпта
+            # Сразу открываем меню редактирования для только что созданного промпта (юзерский флоу)
             prompt = await ctx.repo.get_prompt_by_id(prompt_id)
             if prompt:
-                await ctx.show_prompt_edit_actions(message, prompt)
+                await ctx.show_prompt_edit_actions(message, prompt, is_admin_view=False)
         except Exception as e:
             await message.answer(f"Error refining idea: {e}")
         finally:

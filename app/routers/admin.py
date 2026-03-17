@@ -1798,7 +1798,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             return
 
         await state.clear()
-        await ctx.show_prompt_edit_actions(callback.message, prompt)
+        # Админский флоу: Back to list → admin:pw:list
+        await ctx.show_prompt_edit_actions(callback.message, prompt, is_admin_view=True)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:description:"))

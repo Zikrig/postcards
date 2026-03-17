@@ -84,7 +84,8 @@ def build_community_tags_menu(
         buttons.append([
             InlineKeyboardButton(text=btn_label(name, 24), callback_data=f"menu:community_tag:{t['id']}")
         ])
-    buttons.extend(_pagination_buttons(page, total, "menu:community_tags", "menu:tags"))
+    # Back from community categories should return to the main menu, not reopen this screen
+    buttons.extend(_pagination_buttons(page, total, "menu:community_tags", "menu:main"))
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -391,7 +392,7 @@ def build_feature_config_menu(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
+def build_prompt_edit_menu(prompt_id: int, back_callback: str = "admin:pw:list") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
@@ -402,7 +403,7 @@ def build_prompt_edit_menu(prompt_id: int) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
             [InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")],
-            [InlineKeyboardButton(text="Back to list", callback_data="admin:pw:list")],
+            [InlineKeyboardButton(text="Back to list", callback_data=back_callback)],
         ]
     )
 
