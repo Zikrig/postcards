@@ -2278,6 +2278,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 prompt_variables=variables,
                 variable_descriptions=descriptions,
                 reference_photo_file_id=prompt["reference_photo_file_id"],
+                editing_as_owner=is_owner,
             )
             await state.set_state(None)
 
@@ -2853,9 +2854,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except (TypeError, ValueError):
@@ -2865,13 +2863,19 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
         title = prompt.get("title") or "Untitled"
+        cancel_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
         await callback.message.answer(
             f"Delete prompt «{title}»? This cannot be undone.",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [
                     InlineKeyboardButton(text="Yes, delete", callback_data=f"admin:delete_confirm:{prompt_id}"),
-                    InlineKeyboardButton(text="Cancel", callback_data=f"admin:pw:item:{prompt_id}"),
+                    InlineKeyboardButton(text="Cancel", callback_data=cancel_cb),
                 ],
             ]),
         )
@@ -2882,21 +2886,24 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
-        if not user or not user["is_admin"]:
-            await callback.answer("Admin only", show_alert=True)
-            return
         try:
             prompt_id = int((callback.data or "").split(":")[-1])
         except (TypeError, ValueError):
             await callback.answer("Invalid prompt id", show_alert=True)
             return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
         async with ctx.repo.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT title FROM prompts WHERE id = $1", prompt_id)
-            if not row:
-                await callback.answer("Prompt not found", show_alert=True)
-                return
             await conn.execute("DELETE FROM prompts WHERE id = $1", prompt_id)
-        await callback.message.answer(f"Prompt deleted: {row['title']}")
+        title = prompt.get("title") or "Untitled"
+        await callback.message.answer(f"Prompt deleted: {title}")
         await callback.answer("Deleted")
 
     @router.message(AdminStates.waiting_prompt_title)

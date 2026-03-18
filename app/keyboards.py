@@ -200,8 +200,7 @@ def build_prompt_list_menu(
         active = p.get("is_active", True)
         label = btn_label(f"{'🟢' if active else '🔴'} {p['title']}", 20)
         rows.append([InlineKeyboardButton(text=label, callback_data=f"admin:pw:item:{p['id']}")])
-    # Back from prompt list goes to tag list, not to Prompt work
-    rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:pw:list"))
+    rows.extend(_pagination_buttons(page, total, "admin:pw:list", "admin:prompt_work"))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -514,9 +513,7 @@ def build_prompt_edit_variable_actions_menu(
                 InlineKeyboardButton(text="My own: OFF", callback_data=f"admin:editvar:allow:{prompt_id}:{var_idx}:no"),
             ]
         )
-    # Для владельца промпта Back ведёт в карточку промпта (My prompts),
-    # для чисто админского режима — в список переменных/промптов.
-    back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner_view else f"admin:editpart:variables:{prompt_id}"
+    back_cb = f"admin:editpart:variables:{prompt_id}"
     rows.append([InlineKeyboardButton(text="Back to variables", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
