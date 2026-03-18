@@ -624,10 +624,7 @@ class RouterCtx:
             return
         template = data["template"]
         answers: dict[str, str] = data.get("answers", {})
-        image_urls: list[str] = list(data.get("image_urls", []))
-        # Optionally append signature image, if configured
-        if self.settings.signature_enabled and self.settings.signature_url:
-            image_urls.append(self.settings.signature_url)
+        image_urls: list[str] = data.get("image_urls", [])
         prompt_title = data["prompt_title"]
         final_prompt = render_prompt(template, answers)
         progress_message = await message.answer(

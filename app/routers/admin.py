@@ -1275,9 +1275,6 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             "?q=49&fit=crop&w=1600&h=900&dpr=2"
         )
         image_urls: list[str] = [_test_image_url]
-        # Optionally append signature image, if configured
-        if ctx.settings.signature_enabled and ctx.settings.signature_url:
-            image_urls.append(ctx.settings.signature_url)
         # Charge for test: 1 token for anyone (user testing own prompt, or admin testing)
         # BUT: For admins testing community prompts, it's free as requested
         user_tg_id = callback.from_user.id
