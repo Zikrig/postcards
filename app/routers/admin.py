@@ -319,7 +319,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         enabled = await ctx.repo.get_signature_enabled()
         from app.keyboards import build_admin_signature_menu
         await callback.message.edit_text(
-            f"Signature Setting (Подпись).\n\n"
+            f"Signature Setting.\n\n"
             f"When enabled, the bot will organically add the text \"{ctx.settings.public_name}\" somewhere on the generated image.\n\n"
             f"Current status: {'ENABLED' if enabled else 'DISABLED'}",
             reply_markup=build_admin_signature_menu(enabled)
@@ -340,7 +340,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         
         from app.keyboards import build_admin_signature_menu
         await callback.message.edit_text(
-            f"Signature Setting (Подпись).\n\n"
+            f"Signature Setting.\n\n"
             f"When enabled, the bot will organically add the text \"{ctx.settings.public_name}\" somewhere on the generated image.\n\n"
             f"Current status: {'ENABLED' if new_state else 'DISABLED'}",
             reply_markup=build_admin_signature_menu(new_state)

@@ -631,7 +631,7 @@ class RouterCtx:
         # Add signature if enabled
         signature_enabled = await self.repo.get_signature_enabled()
         if signature_enabled and self.settings.public_name:
-            signature_text = f"\n\nAdd the text \"{self.settings.public_name}\" somewhere on the image, integrate it naturally and organically. The phrase should be subtle and not be conspicuous."
+            signature_text = f"\n\nAdd the text \"{self.settings.public_name}\" somewhere on the image, integrate it naturally and organically."
             final_prompt += signature_text
 
         progress_message = await message.answer(
