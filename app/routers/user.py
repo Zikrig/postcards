@@ -140,6 +140,7 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             is_admin_view=is_admin and not is_owner,
             template=template,
             show_clone=is_admin,
+            back_callback="menu:my_prompts:0",
         )
         if example_ids:
             await callback.message.answer_photo(

@@ -2197,6 +2197,7 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             prompt_variables=variables,
             variable_descriptions=descriptions,
             reference_photo_file_id=prompt["reference_photo_file_id"],
+            editing_as_owner=is_owner,
         )
         await state.set_state(None)
         await ctx.show_variable_pick_menu(callback.message, state)
