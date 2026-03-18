@@ -677,15 +677,16 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         feat = features[feat_key]
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
+        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat, back_callback=back_cb),
             )
         except TelegramBadRequest:
             await callback.message.answer(
                 f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat),
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat, back_callback=back_cb),
             )
         await callback.answer()
 
@@ -752,16 +753,17 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
+            back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
                         prompt_id,
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
+                        back_callback=back_cb,
                     )
                 )
             except TelegramBadRequest:
-                # Ignore harmless edit errors (e.g. message was changed elsewhere).
                 pass
         await callback.answer()
 
@@ -893,12 +895,14 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
+            back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
                         prompt_id,
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
+                        back_callback=back_cb,
                     )
                 )
             except TelegramBadRequest:
@@ -961,9 +965,12 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
+            is_admin = bool((await ctx.repo.get_user(message.from_user.id) or {}).get("is_admin"))
+            is_owner = prompt.get("owner_tg_id") == message.from_user.id
+            back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
             await message.answer(
                 "Option added.",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {})),
+                reply_markup=build_feature_config_menu(prompt_id, feat_key, feach_data.get("features", {}).get(feat_key, {}), back_callback=back_cb),
             )
 
     @router.callback_query(F.data.startswith("admin:featdone:"))
@@ -1880,9 +1887,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         is_active = bool(prompt.get("is_active", True))
-        # Режим admin-view только когда АДМИН смотрит ЧУЖОЙ community-промпт
-        # Если админ смотрит свой собственный промпт, он должен видеть полное меню владельца.
-        is_admin_view = bool(is_admin and owner_tg_id is not None and not is_owner)
+        # Для админа в админке: кнопка Back всегда ведет в админский список.
+        back_cb = "admin:pw:list"
+        
+        # Режим "урезанного" меню только если админ смотрит ЧУЖОЙ промпт.
+        is_community_admin_view = bool(owner_tg_id is not None and not is_owner)
 
         template = str(prompt.get("template") or "")
         text = await ctx.format_prompt_description(prompt)
@@ -1897,9 +1906,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=owner_tg_id,
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin_view,
+                    is_admin_view=is_community_admin_view,
                     template=template,
                     show_clone=is_admin,
+                    back_callback=back_cb,
                 ),
             )
         except TelegramBadRequest:

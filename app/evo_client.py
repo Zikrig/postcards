@@ -19,12 +19,12 @@ class EvoClient:
             "Content-Type": "application/json",
         }
 
-    async def create_task(self, prompt: str, image_urls: list[str]) -> str:
+    async def create_task(self, prompt: str, image_urls: list[str], quality: str | None = None) -> str:
         payload: dict[str, Any] = {
             "model": self.settings.image_model,
             "prompt": prompt,
             "size": self.settings.image_size,
-            "quality": self.settings.image_quality,
+            "quality": quality or self.settings.image_quality,
         }
         if image_urls:
             payload["image_urls"] = image_urls

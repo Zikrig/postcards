@@ -598,6 +598,8 @@ class RouterCtx:
 
     async def run_generation(self, message: Message, state: FSMContext, cost: int = 1) -> None:
         data = await state.get_data()
+        generation_cost: int = data.get("generation_cost", cost)
+        generation_quality: str = data.get("generation_quality", self.settings.image_quality)
         user_tg_id = int(
             data.get("request_user_id")
             or ((message.from_user.id if message.from_user else 0))
@@ -605,17 +607,16 @@ class RouterCtx:
         if not user_tg_id:
             await message.answer("Cannot detect user account for billing.")
             return
-        # Generation is free for admins (requested for community prompts, but generally applies to admin tasks)
         is_admin = user_tg_id in self.settings.admin_ids
         if is_admin:
             new_balance = await self.repo.get_user_balance(user_tg_id)
         else:
-            new_balance = await self.repo.consume_tokens(user_tg_id, cost)
+            new_balance = await self.repo.consume_tokens(user_tg_id, generation_cost)
 
         if new_balance is None:
             balance = await self.repo.get_user_balance(user_tg_id)
             await message.answer(
-                f"Not enough balance for generation ({cost} tokens needed).\n"
+                f"Not enough balance for generation ({generation_cost} tokens needed).\n"
                 f"Your balance: {balance}\n"
                 "Apply a promo code via your start link."
             )
@@ -628,11 +629,11 @@ class RouterCtx:
         prompt_title = data["prompt_title"]
         final_prompt = render_prompt(template, answers)
         progress_message = await message.answer(
-            f"Generating image for prompt: {prompt_title}\nStatus: queued"
+            f"Generating image ({generation_quality}) for prompt: {prompt_title}\nStatus: queued"
         )
         last_progress_text = progress_message.text or ""
         try:
-            task_id = await self.evo.create_task(final_prompt, image_urls=image_urls)
+            task_id = await self.evo.create_task(final_prompt, image_urls=image_urls, quality=generation_quality)
 
             async def update_progress(status: Any, progress: Any) -> None:
                 nonlocal last_progress_text

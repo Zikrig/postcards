@@ -107,10 +107,12 @@ def build_prompts_by_tag_menu(
 
 
 def build_prompt_preview_menu(prompt_id: int, back_callback: str = "menu:main") -> InlineKeyboardMarkup:
-    """Клавиатура экрана превью промпта: описание + иллюстрации, затем Генерировать (1 🪙) и Назад."""
+    """Клавиатура экрана превью промпта: описание + иллюстрации, кнопки генерации 1K/2K/4K и Назад."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Generate (1 🪙)", callback_data=f"prompt:generate:{prompt_id}")],
+            [InlineKeyboardButton(text="🚀 Generate 1K (1 🪙)", callback_data=f"prompt:generate:1k:{prompt_id}")],
+            [InlineKeyboardButton(text="🚀 Generate 2K (2 🪙)", callback_data=f"prompt:generate:2k:{prompt_id}")],
+            [InlineKeyboardButton(text="🚀 Generate 4K (4 🪙)", callback_data=f"prompt:generate:4k:{prompt_id}")],
             [InlineKeyboardButton(text="◀ Back", callback_data=back_callback)],
         ]
     )
@@ -322,7 +324,7 @@ def build_prompt_feach_menu(
         # These buttons only if NOT draft
         if not is_community_admin:
             rows.append([
-                InlineKeyboardButton(text=f"🚀 Generate (1 🪙)", callback_data=f"prompt:select:{prompt_id}"),
+                InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}"),
             ])
             test_label = "1 🪙 Test" if owner_tg_id else "Test"
             rows.append([InlineKeyboardButton(text=test_label, callback_data=f"admin:test:{prompt_id}")])
@@ -376,6 +378,7 @@ def build_feature_config_menu(
     prompt_id: int,
     feat_key: str,
     feature: dict[str, Any],
+    back_callback: Optional[str] = None,
 ) -> InlineKeyboardMarkup:
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
@@ -407,10 +410,8 @@ def build_feature_config_menu(
         InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
-    rows.append([InlineKeyboardButton(text="Don't specify", callback_data=f"admin:featdel:{prompt_id}:{feat_key}")])
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
-    # Back: владелец возвращается в свою карточку (My prompts), админ — в admin:pw:item.
-    back_cb = f"menu:my_prompt_item:{prompt_id}"
+    back_cb = back_callback or f"menu:my_prompt_item:{prompt_id}"
     rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

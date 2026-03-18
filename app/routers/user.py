@@ -443,8 +443,19 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         if not user["is_authorized"]:
             await callback.answer("Please use /start first.", show_alert=True)
             return
+        parts = (callback.data or "").split(":")
+        # prompt:generate:{quality}:{prompt_id}  or legacy prompt:generate:{prompt_id}
+        quality_cost_map = {"1k": 1, "2k": 2, "4k": 4}
+        if len(parts) >= 4 and parts[2].lower() in quality_cost_map:
+            quality = parts[2].upper()
+            cost = quality_cost_map[parts[2].lower()]
+            raw_id = parts[3]
+        else:
+            quality = "1K"
+            cost = 1
+            raw_id = parts[-1]
         try:
-            prompt_id = int((callback.data or "").split(":")[-1])
+            prompt_id = int(raw_id)
         except ValueError:
             await callback.answer("Invalid prompt", show_alert=True)
             return
@@ -469,6 +480,8 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             request_user_id=callback.from_user.id,
             request_username=callback.from_user.username or "",
             request_full_name=callback.from_user.full_name or "",
+            generation_quality=quality,
+            generation_cost=cost,
         )
         if prompt["reference_photo_file_id"]:
             try:
