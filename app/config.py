@@ -27,6 +27,9 @@ class Settings:
     image_quality: str
     poll_interval_seconds: float
     task_timeout_seconds: int
+    webhook_on: bool
+    webhook_domain: str
+    webhook_port: int
 
 
 def load_settings() -> Settings:
@@ -52,6 +55,11 @@ def load_settings() -> Settings:
         f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}",
     )
 
+    webhook_on = os.getenv("WEBHOOK_ON", "").strip().lower() in ("true", "1", "yes")
+    webhook_domain = os.getenv("WEBHOOK_DOMAIN", "").strip()
+    if webhook_on and not webhook_domain:
+        raise RuntimeError("WEBHOOK_DOMAIN is required when WEBHOOK_ON=true")
+
     return Settings(
         bot_token=bot_token,
         user_password=user_password,
@@ -64,4 +72,7 @@ def load_settings() -> Settings:
         image_quality=os.getenv("IMAGE_QUALITY", "1K"),
         poll_interval_seconds=float(os.getenv("POLL_INTERVAL_SECONDS", "3")),
         task_timeout_seconds=int(os.getenv("TASK_TIMEOUT_SECONDS", "120")),
+        webhook_on=webhook_on,
+        webhook_domain=webhook_domain,
+        webhook_port=int(os.getenv("WEBHOOK_PORT", "8080")),
     )
