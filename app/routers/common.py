@@ -1,13 +1,16 @@
 """Shared context and helpers for routers (ensure_user, run_generation, etc.)."""
 import logging
 import asyncio
+import io
 from typing import Any, Optional, Dict, List, Union
 
 import asyncpg
 from aiogram import Bot, BaseMiddleware
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, TelegramObject, BufferedInputFile
+
+import aiohttp
 
 
 class AlbumMiddleware(BaseMiddleware):
@@ -680,7 +683,10 @@ class RouterCtx:
                 return
             await progress_message.delete()
             for url in results:
-                await message.answer_photo(photo=url)
+                try:
+                    await message.answer_photo(photo=url)
+                except TelegramBadRequest:
+                    await self._send_photo_via_download(message, url)
             await message.answer(f"Your balance: {new_balance}")
             await self.maybe_notify_admins_balance_checkpoint(data)
         except Exception as e:
@@ -692,6 +698,39 @@ class RouterCtx:
         finally:
             await state.clear()
             await self.show_prompt_buttons(message)
+
+    async def _send_photo_via_download(self, message: Message, url: str) -> None:
+        """Download image from URL and send as a file upload (fallback for large/slow URLs)."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                if resp.status >= 400:
+                    await message.answer(f"Failed to download image (HTTP {resp.status}).")
+                    return
+                data = await resp.read()
+        ext = url.rsplit(".", 1)[-1].split("?")[0].lower() if "." in url else "png"
+        if ext not in ("jpg", "jpeg", "png", "webp"):
+            ext = "png"
+        photo = BufferedInputFile(data, filename=f"result.{ext}")
+        if len(data) > 10 * 1024 * 1024:
+            await message.answer_document(document=photo)
+        else:
+            await message.answer_photo(photo=photo)
+
+    async def _send_photo_via_download_return(self, message: Message, url: str) -> Optional[Message]:
+        """Like _send_photo_via_download but returns the sent Message (for extracting file_id)."""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                if resp.status >= 400:
+                    await message.answer(f"Failed to download image (HTTP {resp.status}).")
+                    return None
+                data = await resp.read()
+        ext = url.rsplit(".", 1)[-1].split("?")[0].lower() if "." in url else "png"
+        if ext not in ("jpg", "jpeg", "png", "webp"):
+            ext = "png"
+        photo = BufferedInputFile(data, filename=f"result.{ext}")
+        if len(data) > 10 * 1024 * 1024:
+            return await message.answer_document(document=photo)
+        return await message.answer_photo(photo=photo)
 
     async def maybe_notify_admins_balance_checkpoint(self, state_data: dict[str, Any]) -> None:
         credits = await self.evo.get_credits()

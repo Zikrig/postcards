@@ -1323,8 +1323,11 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                 await callback.message.answer("No image returned.")
                 return
             await progress_msg.delete()
-            sent = await callback.message.answer_photo(photo=results[0])
-            file_id = sent.photo[-1].file_id if sent.photo else None
+            try:
+                sent = await callback.message.answer_photo(photo=results[0])
+            except TelegramBadRequest:
+                sent = await ctx._send_photo_via_download_return(callback.message, results[0])
+            file_id = (sent.photo[-1].file_id if sent and sent.photo else None)
             if file_id:
                 await state.update_data(admin_test_prompt_id=prompt_id, admin_test_file_id=file_id)
                 await callback.message.answer(
