@@ -704,35 +704,6 @@ class Repo:
                 json.dumps({"amount": amount}),
             )
 
-    async def get_signature_enabled(self) -> bool:
-        """Returns whether prompt signature is enabled."""
-        async with self.pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT value FROM settings WHERE key = $1", "signature_enabled")
-            if not row:
-                return False
-            try:
-                data = row["value"]
-                if isinstance(data, dict):
-                    return bool(data.get("enabled", False))
-                if isinstance(data, bool):
-                    return data
-                return False
-            except (ValueError, TypeError, json.JSONDecodeError):
-                return False
-
-    async def set_signature_enabled(self, enabled: bool) -> None:
-        """Sets whether prompt signature is enabled."""
-        async with self.pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO settings (key, value)
-                VALUES ($1, $2)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                """,
-                "signature_enabled",
-                json.dumps({"enabled": enabled}),
-            )
-
     async def delete_user(self, tg_id: int) -> bool:
         """Deletes a user from the users table. Returns True if deleted."""
         async with self.pool.acquire() as conn:

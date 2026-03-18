@@ -152,17 +152,6 @@ def build_admin_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="Promo codes", callback_data="admin:promo_menu")],
             [InlineKeyboardButton(text="Greeting", callback_data="admin:greeting")],
             [InlineKeyboardButton(text="Initial tokens", callback_data="admin:initial_tokens")],
-            [InlineKeyboardButton(text="Signature", callback_data="admin:signature_menu")],
-        ]
-    )
-
-
-def build_admin_signature_menu(enabled: bool) -> InlineKeyboardMarkup:
-    status = "Enabled 🟢" if enabled else "Disabled 🔴"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=f"Status: {status}", callback_data="admin:signature:toggle")],
-            [InlineKeyboardButton(text="Back", callback_data="admin:main")],
         ]
     )
 

@@ -624,16 +624,12 @@ class RouterCtx:
             return
         template = data["template"]
         answers: dict[str, str] = data.get("answers", {})
-        image_urls: list[str] = data.get("image_urls", [])
+        image_urls: list[str] = list(data.get("image_urls", []))
+        # Optionally append signature image, if configured
+        if self.settings.signature_enabled and self.settings.signature_url:
+            image_urls.append(self.settings.signature_url)
         prompt_title = data["prompt_title"]
         final_prompt = render_prompt(template, answers)
-
-        # Add signature if enabled
-        signature_enabled = await self.repo.get_signature_enabled()
-        if signature_enabled and self.settings.public_name:
-            signature_text = f"\n\nAdd the text \"{self.settings.public_name}\" somewhere on the image, integrate it naturally and organically."
-            final_prompt += signature_text
-
         progress_message = await message.answer(
             f"Generating image for prompt: {prompt_title}\nStatus: queued"
         )

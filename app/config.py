@@ -27,7 +27,8 @@ class Settings:
     image_quality: str
     poll_interval_seconds: float
     task_timeout_seconds: int
-    public_name: str
+    signature_url: str
+    signature_enabled: bool
 
 
 def load_settings() -> Settings:
@@ -53,6 +54,11 @@ def load_settings() -> Settings:
         f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}",
     )
 
+    # Signature overlay settings
+    signature_url = os.getenv("SIGNATURE_URL", "").strip()
+    signature_enabled_raw = os.getenv("SIGNATURE_ENABLED", "false").strip().lower()
+    signature_enabled = signature_enabled_raw in ("1", "true", "yes", "on")
+
     return Settings(
         bot_token=bot_token,
         user_password=user_password,
@@ -65,5 +71,6 @@ def load_settings() -> Settings:
         image_quality=os.getenv("IMAGE_QUALITY", "1K"),
         poll_interval_seconds=float(os.getenv("POLL_INTERVAL_SECONDS", "3")),
         task_timeout_seconds=int(os.getenv("TASK_TIMEOUT_SECONDS", "120")),
-        public_name=os.getenv("PUBLIC_NAME", "Postcards").strip(),
+        signature_url=signature_url,
+        signature_enabled=signature_enabled,
     )
