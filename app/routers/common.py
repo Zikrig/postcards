@@ -431,9 +431,11 @@ class RouterCtx:
             if prompt:
                 await self.show_prompt_edit_actions(message, prompt)
             return
+        is_owner = data.get("editing_as_owner", False)
+        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:edit:{prompt_id}"
         await message.answer(
             "Choose variable to edit:",
-            reply_markup=build_prompt_edit_variables_menu(int(prompt_id), variables),
+            reply_markup=build_prompt_edit_variables_menu(int(prompt_id), variables, back_callback=back_cb),
         )
 
     async def show_variable_actions_menu(self, message: Message, state: FSMContext, var_idx: int) -> None:
