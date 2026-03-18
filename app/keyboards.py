@@ -480,18 +480,17 @@ def build_prompt_edit_tags_menu(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, str]]) -> InlineKeyboardMarkup:
+def build_prompt_edit_variables_menu(prompt_id: int, variables: list[dict[str, str]], back_callback: Optional[str] = None) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
     for idx, var in enumerate(variables):
-        # Читабельные имена переменных: CHARACTER_POSITION → "Character position"
         label = pretty_variable_label(var.get("name", ""), max_length=25)
         text = label or variable_token(var)
         rows.append(
             [InlineKeyboardButton(text=text, callback_data=f"admin:editvar:pick:{prompt_id}:{idx}")]
         )
-    # Кнопка добавления новой переменной
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Back to prompt edit", callback_data=f"admin:edit:{prompt_id}")])
+    back_cb = back_callback or f"admin:edit:{prompt_id}"
+    rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

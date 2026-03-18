@@ -1921,9 +1921,10 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
                     is_active,
                     owner_tg_id=owner_tg_id,
                     is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin_view,
+                    is_admin_view=is_community_admin_view,
                     template=template,
                     show_clone=is_admin,
+                    back_callback=back_cb,
                 ),
             )
         await callback.answer()
