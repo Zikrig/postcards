@@ -95,6 +95,34 @@ class RouterCtx:
     async def ensure_user(self, message: Message) -> asyncpg.Record:
         return await self.ensure_user_from_tg(message.from_user)
 
+    async def format_prompt_description(self, prompt: asyncpg.Record) -> str:
+        """Returns a formatted description string for a prompt, including the author if available."""
+        title = prompt.get("title") or "Untitled"
+        description = (prompt.get("description") or title).strip()
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        idea = feach_data.get("idea", "")
+        
+        text = f"Prompt: {title}"
+        if idea:
+            text += f"\n\nIdea: {idea}"
+        
+        # Add description if different from title and idea
+        if description and description != title and description != idea:
+            text += f"\n\nDescription: {description}"
+            
+        owner_tg_id = prompt.get("owner_tg_id")
+        if owner_tg_id:
+            author = await self.repo.get_user(owner_tg_id)
+            if author:
+                author_name = author.get("username")
+                if author_name:
+                    author_name = f"@{author_name}"
+                else:
+                    author_name = author.get("full_name") or f"ID: {owner_tg_id}"
+                text += f"\n\nAuthor: {author_name}"
+        
+        return text
+
     def extract_start_payload(self, message_text: str) -> str:
         parts = (message_text or "").split(maxsplit=1)
         if len(parts) < 2:

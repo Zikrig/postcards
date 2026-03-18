@@ -119,7 +119,8 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
-        desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
+        desc = await ctx.format_prompt_description(prompt)
+        
         raw_examples = prompt.get("example_file_ids") or []
         # Нормализуем: может быть list или JSON-строка
         if isinstance(raw_examples, str):
@@ -183,7 +184,8 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
         )
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         template = str(prompt.get("template") or "")
-        desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
+        desc = await ctx.format_prompt_description(prompt)
+
         is_admin = bool(user.get("is_admin"))
         owner_tg_id = prompt.get("owner_tg_id")
         is_owner = owner_tg_id == callback.from_user.id
@@ -305,7 +307,8 @@ def register_user(router: Router, ctx: RouterCtx) -> None:
             if prompt:
                 feach_data = ensure_dict(prompt.get("feach_data") or {})
                 template = str(prompt.get("template") or "")
-                desc = (prompt.get("description") or prompt.get("title") or "").strip() or prompt["title"]
+                desc = await ctx.format_prompt_description(prompt)
+                
                 raw_examples = prompt.get("example_file_ids") or []
                 if isinstance(raw_examples, str):
                     try:

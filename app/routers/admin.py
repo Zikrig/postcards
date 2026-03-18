@@ -817,65 +817,35 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         # Если обычный пользователь редактирует СВОЙ промпт, показываем юзерское меню,
         # чтобы Back вёл в его My prompts, а не в админку.
         view_as_admin = bool(is_admin and not is_owner)
-        if feach_data.get("features"):
-            idea = feach_data.get("idea", "")
-            try:
-                await callback.message.edit_text(
-                    f"Prompt: {prompt['title']}\n\nIdea: {idea}",
-                    reply_markup=build_prompt_feach_menu(
-                        prompt_id,
-                        feach_data,
-                        is_active,
-                        owner_tg_id=prompt.get("owner_tg_id"),
-                        is_public=prompt.get("is_public", False),
-                        is_admin_view=view_as_admin,
-                        template=template,
-                        show_clone=is_admin,
-                    ),
-                )
-            except TelegramBadRequest:
-                await callback.message.answer(
-                    f"Prompt: {prompt['title']}\n\nIdea: {idea}",
-                    reply_markup=build_prompt_feach_menu(
-                        prompt_id,
-                        feach_data,
-                        is_active,
-                        owner_tg_id=prompt.get("owner_tg_id"),
-                        is_public=prompt.get("is_public", False),
-                        is_admin_view=view_as_admin,
-                        template=template,
-                        show_clone=is_admin,
-                    ),
-                )
-        else:
-            try:
-                await callback.message.edit_text(
-                    f"Prompt: {prompt['title']}",
-                    reply_markup=build_prompt_feach_menu(
-                        prompt_id,
-                        feach_data,
-                        is_active,
-                        owner_tg_id=prompt.get("owner_tg_id"),
-                        is_public=prompt.get("is_public", False),
-                        is_admin_view=view_as_admin,
-                        template=template,
-                        show_clone=is_admin,
-                    ),
-                )
-            except TelegramBadRequest:
-                await callback.message.answer(
-                    f"Prompt: {prompt['title']}",
-                    reply_markup=build_prompt_feach_menu(
-                        prompt_id,
-                        feach_data,
-                        is_active,
-                        owner_tg_id=prompt.get("owner_tg_id"),
-                        is_public=prompt.get("is_public", False),
-                        is_admin_view=view_as_admin,
-                        template=template,
-                        show_clone=is_admin,
-                    ),
-                )
+        text = await ctx.format_prompt_description(prompt)
+        try:
+            await callback.message.edit_text(
+                text,
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=view_as_admin,
+                    template=template,
+                    show_clone=is_admin,
+                ),
+            )
+        except TelegramBadRequest:
+            await callback.message.answer(
+                text,
+                reply_markup=build_prompt_feach_menu(
+                    prompt_id,
+                    feach_data,
+                    is_active,
+                    owner_tg_id=prompt.get("owner_tg_id"),
+                    is_public=prompt.get("is_public", False),
+                    is_admin_view=view_as_admin,
+                    template=template,
+                    show_clone=is_admin,
+                ),
+            )
         await callback.answer("Feature deleted")
 
     @router.callback_query(F.data.startswith("admin:myown:"))
@@ -1470,33 +1440,21 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         user = await ctx.repo.get_user(callback.from_user.id)
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
-        if feach_data and feach_data.get("features"):
-            await callback.message.answer(
-                f"Prompt: {prompt['title']}\nIdea: {feach_data.get('idea', '')}",
-                reply_markup=build_prompt_feach_menu(
-                    prompt_id,
-                    feach_data,
-                    is_active,
-                    owner_tg_id=prompt.get("owner_tg_id"),
-                    is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin and not is_owner,
-                    template=template,
-                    show_clone=is_admin,
-                ),
-            )
-        else:
-            await callback.message.answer(
-                f"Prompt: {prompt['title']}",
-                reply_markup=build_prompt_feach_menu(
-                    prompt_id,
-                    feach_data or {},
-                    is_active,
-                    owner_tg_id=prompt.get("owner_tg_id"),
-                    is_public=prompt.get("is_public", False),
-                    is_admin_view=is_admin and not is_owner,
-                    template=template,
-                )
-            )
+        text = await ctx.format_prompt_description(prompt)
+        
+        await callback.message.answer(
+            text,
+            reply_markup=build_prompt_feach_menu(
+                prompt_id,
+                feach_data or {},
+                is_active,
+                owner_tg_id=prompt.get("owner_tg_id"),
+                is_public=prompt.get("is_public", False),
+                is_admin_view=is_admin and not is_owner,
+                template=template,
+                show_clone=is_admin,
+            ),
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:export:"))
@@ -1926,11 +1884,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         # Если админ смотрит свой собственный промпт, он должен видеть полное меню владельца.
         is_admin_view = bool(is_admin and owner_tg_id is not None and not is_owner)
 
-        idea = feach_data.get("idea", "") if feach_data else ""
         template = str(prompt.get("template") or "")
-        text = f"Prompt: {prompt['title']}"
-        if idea:
-            text = f"{text}\n\nIdea: {idea}"
+        text = await ctx.format_prompt_description(prompt)
         
         # Use edit_text if possible for smoother UI
         try:
