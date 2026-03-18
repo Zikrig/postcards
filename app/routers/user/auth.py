@@ -4,12 +4,12 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
-from app.keyboards import build_admin_menu
+from app.keyboards.admin import build_admin_menu
 
-from .common import RouterCtx
+from app.routers.common import RouterCtx
 
 
-def register_auth(router: Router, ctx: RouterCtx) -> None:
+def register_user_auth(router: Router, ctx: RouterCtx) -> None:
     @router.message(CommandStart())
     async def start_handler(message: Message, state: FSMContext) -> None:
         user = await ctx.ensure_user(message)

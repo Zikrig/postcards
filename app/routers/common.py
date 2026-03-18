@@ -48,16 +48,22 @@ class AlbumMiddleware(BaseMiddleware):
 
 from app.config import Settings
 from app.evo_client import EvoClient
-from app.keyboards import (
+from app.keyboards.user import (
     build_main_menu,
+    build_my_prompts_menu,
+    build_prompts_by_tag_menu,
+    build_tags_menu,
+    build_user_prompt_card,
+    build_community_tags_menu,
+)
+from app.keyboards.admin import (
+    build_admin_community_card,
+    build_admin_prompt_card,
+    build_admin_user_prompts_menu,
+    build_admin_users_with_prompts_menu,
     build_prompt_edit_menu,
     build_prompt_edit_variable_actions_menu,
     build_prompt_edit_variables_menu,
-    build_prompts_by_tag_menu,
-    build_tags_menu,
-    build_user_prompts_menu,
-    build_admin_users_with_prompts_menu,
-    build_community_tags_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -202,24 +208,24 @@ class RouterCtx:
 
     async def show_user_prompts(self, message: Message, owner_tg_id: int, page: int = 0, is_admin_view: bool = False) -> None:
         prompts, total = await self.repo.list_user_prompts_paginated(owner_tg_id, page=page, per_page=self.repo.PAGE_SIZE)
-        text = "Your prompts:" if not is_admin_view else f"Prompts by user {owner_tg_id}:"
-        if not prompts:
-            text = "You have no prompts yet." if not is_admin_view else f"User {owner_tg_id} has no prompts."
-        await message.answer(
-            text,
-            reply_markup=build_user_prompts_menu(prompts, page=page, total=total, is_admin_view=is_admin_view, owner_tg_id=owner_tg_id)
-        )
+        if is_admin_view:
+            text = f"Prompts by user {owner_tg_id}:" if prompts else f"User {owner_tg_id} has no prompts."
+            markup = build_admin_user_prompts_menu(prompts, owner_tg_id, page=page, total=total)
+        else:
+            text = "Your prompts:" if prompts else "You have no prompts yet."
+            markup = build_my_prompts_menu(prompts, page=page, total=total)
+        await message.answer(text, reply_markup=markup)
 
     async def edit_to_user_prompts(self, message: Message, owner_tg_id: int, page: int = 0, is_admin_view: bool = False) -> None:
         prompts, total = await self.repo.list_user_prompts_paginated(owner_tg_id, page=page, per_page=self.repo.PAGE_SIZE)
-        text = "Your prompts:" if not is_admin_view else f"Prompts by user {owner_tg_id}:"
-        if not prompts:
-            text = "You have no prompts yet." if not is_admin_view else f"User {owner_tg_id} has no prompts."
+        if is_admin_view:
+            text = f"Prompts by user {owner_tg_id}:" if prompts else f"User {owner_tg_id} has no prompts."
+            markup = build_admin_user_prompts_menu(prompts, owner_tg_id, page=page, total=total)
+        else:
+            text = "Your prompts:" if prompts else "You have no prompts yet."
+            markup = build_my_prompts_menu(prompts, page=page, total=total)
         try:
-            await message.edit_text(
-                text,
-                reply_markup=build_user_prompts_menu(prompts, page=page, total=total, is_admin_view=is_admin_view, owner_tg_id=owner_tg_id)
-            )
+            await message.edit_text(text, reply_markup=markup)
         except TelegramBadRequest:
             await self.show_user_prompts(message, owner_tg_id, page, is_admin_view)
 
@@ -271,10 +277,8 @@ class RouterCtx:
             name = tag["name"] if tag else str(tag_id)
         
         text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
-        from app.keyboards import build_prompts_by_tag_menu
         markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
         
-        # Create a new markup with replaced callback data because buttons are immutable
         new_rows = []
         for row in markup.inline_keyboard:
             new_row = []
@@ -303,7 +307,6 @@ class RouterCtx:
             name = tag["name"] if tag else str(tag_id)
         
         text = f"Community prompts in «{name}»:" if prompts else f"No community prompts in «{name}»."
-        from app.keyboards import build_prompts_by_tag_menu
         markup = build_prompts_by_tag_menu(prompts, tag_id, page=page, total=total)
         
         new_rows = []
@@ -372,6 +375,64 @@ class RouterCtx:
                 cfg["allow_custom"] = True
             normalized[token] = cfg
         return normalized
+
+    def build_prompt_card_markup(
+        self,
+        prompt: asyncpg.Record,
+        viewer_tg_id: int,
+        back_callback: Optional[str] = None,
+    ) -> InlineKeyboardMarkup:
+        """Pick the correct prompt-card keyboard based on viewer's role."""
+        owner_tg_id = prompt.get("owner_tg_id")
+        is_admin = viewer_tg_id in self.settings.admin_ids
+        is_owner = owner_tg_id == viewer_tg_id
+
+        prompt_id = int(prompt["id"])
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        is_active = bool(prompt.get("is_active", True))
+        template = str(prompt.get("template") or "")
+
+        if is_admin and not is_owner and owner_tg_id is not None:
+            return build_admin_community_card(
+                prompt_id,
+                feach_data,
+                template=template,
+                back_callback=back_callback or "admin:pw:users:0",
+            )
+        elif owner_tg_id is None:
+            return build_admin_prompt_card(
+                prompt_id,
+                feach_data,
+                is_active,
+                template=template,
+                back_callback=back_callback or "admin:pw:list",
+                show_clone=is_admin,
+            )
+        else:
+            return build_user_prompt_card(
+                prompt_id,
+                feach_data,
+                is_active,
+                is_public=prompt.get("is_public", False),
+                template=template,
+                back_callback=back_callback or "menu:my_prompts:0",
+                show_clone=is_admin,
+            )
+
+    async def show_prompt_card(
+        self,
+        message: Message,
+        prompt: asyncpg.Record,
+        viewer_tg_id: int,
+        back_callback: Optional[str] = None,
+    ) -> None:
+        """Display a prompt card with the correct keyboard for the viewer."""
+        text = await self.format_prompt_description(prompt)
+        markup = self.build_prompt_card_markup(prompt, viewer_tg_id, back_callback)
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except TelegramBadRequest:
+            await message.answer(text, reply_markup=markup)
 
     async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:
         """
