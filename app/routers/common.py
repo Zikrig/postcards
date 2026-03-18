@@ -627,6 +627,13 @@ class RouterCtx:
         image_urls: list[str] = data.get("image_urls", [])
         prompt_title = data["prompt_title"]
         final_prompt = render_prompt(template, answers)
+
+        # Add signature if enabled
+        signature_enabled = await self.repo.get_signature_enabled()
+        if signature_enabled and self.settings.public_name:
+            signature_text = f"\n\nAdd the text \"{self.settings.public_name}\" somewhere on the image, integrate it naturally and organically. The phrase should be subtle and not be conspicuous."
+            final_prompt += signature_text
+
         progress_message = await message.answer(
             f"Generating image for prompt: {prompt_title}\nStatus: queued"
         )

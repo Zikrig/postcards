@@ -27,6 +27,7 @@ class Settings:
     image_quality: str
     poll_interval_seconds: float
     task_timeout_seconds: int
+    public_name: str
 
 
 def load_settings() -> Settings:
@@ -64,4 +65,5 @@ def load_settings() -> Settings:
         image_quality=os.getenv("IMAGE_QUALITY", "1K"),
         poll_interval_seconds=float(os.getenv("POLL_INTERVAL_SECONDS", "3")),
         task_timeout_seconds=int(os.getenv("TASK_TIMEOUT_SECONDS", "120")),
+        public_name=os.getenv("PUBLIC_NAME", "Postcards").strip(),
     )

@@ -123,8 +123,8 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
             )
         await callback.answer()
 
-    @router.callback_query(F.data == "admin:tags:back")
-    async def admin_tags_back(callback: CallbackQuery) -> None:
+    @router.callback_query(F.data.in_({"admin:tags:back", "admin:main"}))
+    async def admin_back_to_main(callback: CallbackQuery) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
@@ -307,6 +307,45 @@ def register_admin(router: Router, ctx: RouterCtx) -> None:
         )
         await state.set_state(AdminStates.waiting_initial_tokens)
         await callback.answer()
+
+    @router.callback_query(F.data == "admin:signature_menu")
+    async def admin_signature_menu_handler(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        enabled = await ctx.repo.get_signature_enabled()
+        from app.keyboards import build_admin_signature_menu
+        await callback.message.edit_text(
+            f"Signature Setting (Подпись).\n\n"
+            f"When enabled, the bot will organically add the text \"{ctx.settings.public_name}\" somewhere on the generated image.\n\n"
+            f"Current status: {'ENABLED' if enabled else 'DISABLED'}",
+            reply_markup=build_admin_signature_menu(enabled)
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data == "admin:signature:toggle")
+    async def admin_signature_toggle_handler(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user or not user["is_admin"]:
+            await callback.answer("Admin only", show_alert=True)
+            return
+        current = await ctx.repo.get_signature_enabled()
+        new_state = not current
+        await ctx.repo.set_signature_enabled(new_state)
+        
+        from app.keyboards import build_admin_signature_menu
+        await callback.message.edit_text(
+            f"Signature Setting (Подпись).\n\n"
+            f"When enabled, the bot will organically add the text \"{ctx.settings.public_name}\" somewhere on the generated image.\n\n"
+            f"Current status: {'ENABLED' if new_state else 'DISABLED'}",
+            reply_markup=build_admin_signature_menu(new_state)
+        )
+        await callback.answer(f"Signature {'enabled' if new_state else 'disabled'}")
 
     @router.message(AdminStates.waiting_initial_tokens)
     async def admin_initial_tokens_entered(message: Message, state: FSMContext) -> None:
