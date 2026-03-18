@@ -704,6 +704,16 @@ class Repo:
                 json.dumps({"amount": amount}),
             )
 
+    async def delete_user(self, tg_id: int) -> bool:
+        """Deletes a user from the users table. Returns True if deleted."""
+        async with self.pool.acquire() as conn:
+            # We don't delete their prompts because they don't have a hard FK constraint that prevents this
+            # but we need to delete promo redemptions first if they exist to avoid FK errors if they are not ON DELETE CASCADE
+            # Looking at the schema: promo_redemptions(user_tg_id) doesn't have REFERENCES users(tg_id) explicitly in the code above,
+            # but let's be safe and check if it exists.
+            res = await conn.execute("DELETE FROM users WHERE tg_id = $1", tg_id)
+            return res == "DELETE 1"
+
     async def list_prompts_with_tag(self, tag_id: int, active_only: bool = True) -> list[asyncpg.Record]:
         async with self.pool.acquire() as conn:
             tag = await conn.fetchrow("SELECT name FROM tags WHERE id = $1", tag_id)

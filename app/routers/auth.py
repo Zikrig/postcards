@@ -120,6 +120,45 @@ def register_auth(router: Router, ctx: RouterCtx) -> None:
             f"Balance updated: {target_user.get('username') or tg_id} now has {new_balance} tokens (delta: {amount:+d})."
         )
 
+    @router.message(Command("del"))
+    async def del_user_handler(message: Message) -> None:
+        user = await ctx.ensure_user(message)
+        if not user or not user["is_admin"]:
+            await message.answer("Admin only.")
+            return
+        payload = (message.text or "").strip().split(maxsplit=1)
+        if len(payload) < 2:
+            await message.answer(
+                "Usage: /del <user_id_or_@username>\n"
+                "Example: /del 184374602 or /del @username"
+            )
+            return
+        target_str = payload[1].strip()
+        if target_str.startswith("@"):
+            target_user = await ctx.repo.get_user_by_username(target_str)
+        else:
+            try:
+                tg_id = int(target_str)
+                target_user = await ctx.repo.get_user(tg_id)
+            except ValueError:
+                target_user = await ctx.repo.get_user_by_username(target_str)
+        
+        if not target_user:
+            await message.answer("User not found.")
+            return
+        
+        tg_id = int(target_user["tg_id"])
+        if tg_id == message.from_user.id:
+            await message.answer("You cannot delete yourself.")
+            return
+            
+        success = await ctx.repo.delete_user(tg_id)
+        if success:
+            username = target_user.get('username') or tg_id
+            await message.answer(f"User {username} has been deleted from the database. Their prompts remain intact.")
+        else:
+            await message.answer("Failed to delete user.")
+
     @router.message(StateFilter(None), F.text.casefold() == "admin")
     async def admin_text_handler(message: Message) -> None:
         user = await ctx.ensure_user(message)
