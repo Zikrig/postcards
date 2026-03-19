@@ -72,6 +72,20 @@ async def is_primary_onboard_feature_step(
     return keys[idx] == feat_key
 
 
+def _prompt_is_draft(prompt: Any) -> bool:
+    """
+    Detect draft purely from DB fields.
+    We cannot rely on FSM state because `admin:feach:*` callbacks are handled with `state.get_state()==None`.
+    """
+    feach_data_raw = {}
+    if prompt is not None and hasattr(prompt, "get"):
+        feach_data_raw = prompt.get("feach_data") or {}
+    feach_data = ensure_dict(feach_data_raw)
+    draft_idea = str(feach_data.get("idea") or "")
+    template = str(prompt.get("template") or "") if prompt is not None and hasattr(prompt, "get") else ""
+    return (template == draft_idea) or (not template) or (template == "Your prompt template here")
+
+
 def register_shared_features(router: Router, ctx: RouterCtx) -> None:
     async def _reopen_prompt_card_message(message: Message, prompt_id: int, viewer_tg_id: int) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
@@ -214,29 +228,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
         back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-        # Show "dont specify" only during primary onboarding draft editing.
-        # Depending on where user came from, FSM state might not be exactly
-        # `reviewing_variables`, but session data `ponboard_prompt_id` should exist.
-        cur_state = await state.get_state()
-        state_data = await state.get_data()
-        ponboard_prompt_id = state_data.get("ponboard_prompt_id")
-        try:
-            ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
-        except (TypeError, ValueError):
-            ponboard_prompt_id_int = None
-        show_dont = (
-            cur_state == PrimaryPromptOnboardingStates.reviewing_variables
-            or (ponboard_prompt_id_int == prompt_id)
-        )
-        logging.info(
-            "dont_specify debug: prompt_id=%s feat_key=%s cur_state=%r ponboard_prompt_id=%r ponboard_prompt_id_int=%r show_dont=%s",
-            prompt_id,
-            feat_key,
-            cur_state,
-            ponboard_prompt_id,
-            ponboard_prompt_id_int,
-            show_dont,
-        )
+        show_dont = _prompt_is_draft(prompt)
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
@@ -325,17 +317,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            cur_state = await state.get_state()
-            state_data = await state.get_data()
-            ponboard_prompt_id = state_data.get("ponboard_prompt_id")
-            try:
-                ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
-            except (TypeError, ValueError):
-                ponboard_prompt_id_int = None
-            show_dont = (
-                cur_state == PrimaryPromptOnboardingStates.reviewing_variables
-                or (ponboard_prompt_id_int == prompt_id)
-            )
+            show_dont = _prompt_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -408,6 +390,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
+            show_dont = _prompt_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -415,7 +398,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
                         back_callback=back_cb,
-                        show_dont_specify=True,
+                        show_dont_specify=show_dont,
                     )
                 )
             except TelegramBadRequest:
@@ -518,17 +501,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            cur_state = await state.get_state()
-            state_data = await state.get_data()
-            ponboard_prompt_id = state_data.get("ponboard_prompt_id")
-            try:
-                ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
-            except (TypeError, ValueError):
-                ponboard_prompt_id_int = None
-            show_dont = (
-                cur_state == PrimaryPromptOnboardingStates.reviewing_variables
-                or (ponboard_prompt_id_int == prompt_id)
-            )
+            show_dont = _prompt_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -637,7 +610,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     str(feat_key),
                     feach_data.get("features", {}).get(feat_key, {}),
                     back_callback=back_cb,
-                    show_dont_specify=has_ponboard,
+                    show_dont_specify=_prompt_is_draft(prompt),
                 ),
             )
 
@@ -682,6 +655,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                 await state.clear()
                 await callback.answer("Prompt not found", show_alert=True)
                 return
+            show_dont = _prompt_is_draft(prompt)
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             feats = feach_data.get("features") or {}
             if not isinstance(feats, dict):
@@ -699,7 +673,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         next_key,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=True,
+                        show_dont_specify=show_dont,
                     ),
                 )
             except TelegramBadRequest:
@@ -710,7 +684,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         next_key,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=True,
+                        show_dont_specify=show_dont,
                     ),
                 )
             await callback.answer()
