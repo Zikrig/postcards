@@ -119,6 +119,16 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             or (not tmpl)
             or (tmpl == "Your prompt template here")
         )
+        features = feach_data.get("features") or {}
+        feat_keys = list(features.keys()) if isinstance(features, dict) else []
+        logging.info(
+            "_run_final_deepseek_generate: opening gen menu prompt_id=%s is_draft=%s tmpl_eq_idea=%s n_features=%s feature_keys=%s",
+            prompt_id,
+            is_draft,
+            tmpl == (draft_idea or ""),
+            len(feat_keys),
+            feat_keys,
+        )
         is_owner = updated.get("owner_tg_id") == user_tg_id
         back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
         await message.answer(

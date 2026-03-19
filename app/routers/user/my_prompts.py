@@ -128,7 +128,15 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
             api_feach = await ctx.deepseek.refine_idea(idea)
             normalized = normalize_feach_for_storage(api_feach)
             draft_template = normalized.get("idea") or idea
-            
+            feats = (normalized.get("features") or {}) if isinstance(normalized.get("features"), dict) else {}
+            logger.info(
+                "user_prompt_idea_handler: primary feach after refine_idea prompt_title=%r n_features=%s feature_keys=%s idea_len=%s",
+                title,
+                len(feats),
+                list(feats.keys()),
+                len(str(draft_template or "")),
+            )
+
             # Create prompt
             prompt_id = await ctx.repo.insert_prompt(
                 title=title,

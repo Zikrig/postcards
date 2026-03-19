@@ -11,6 +11,8 @@ from app.states import AdminStates
 from app.utils import ensure_dict, extract_variables
 from app.routers.common import RouterCtx
 
+logger = logging.getLogger(__name__)
+
 
 def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
 
@@ -80,12 +82,21 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
             or (template == "Your prompt template here")
         )
 
-        logging.info(
-            "admin_prompt_generation_menu: prompt_id=%s is_draft=%s template_len=%s draft_idea_len=%s",
+        features = feach_data.get("features") or {}
+        feat_keys = list(features.keys()) if isinstance(features, dict) else []
+        tmpl_eq_idea = template == (draft_idea or "")
+        logger.info(
+            "admin_prompt_generation_menu: prompt_id=%s is_draft=%s tmpl_eq_idea=%s template_len=%s draft_idea_len=%s "
+            "n_features=%s feature_keys=%s template_preview=%r idea_preview=%r",
             prompt_id,
             is_draft,
+            tmpl_eq_idea,
             len(template),
             len(str(draft_idea or "")),
+            len(feat_keys),
+            feat_keys,
+            (template[:120] + "…") if len(template) > 120 else template,
+            ((draft_idea or "")[:120] + "…") if len(str(draft_idea or "")) > 120 else (draft_idea or ""),
         )
 
         back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"

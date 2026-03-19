@@ -1,7 +1,11 @@
 """Admin-facing keyboards (no is_admin_view branching)."""
 from typing import Any, Optional
 
+import logging
+
 import asyncpg
+
+logger = logging.getLogger(__name__)
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.utils import btn_label, variable_token, pretty_variable_label
@@ -159,10 +163,13 @@ def build_prompt_generation_menu(
     """
     rows: list[list[InlineKeyboardButton]] = []
 
-    # For final templates: show per-variable/feature configuration buttons inside this submenu.
-    # We intentionally do not show these buttons on the prompt card level.
-    if (not is_draft) and feach_data:
+    # Per-variable / feach configuration: needed both for drafts (template ≈ idea, primary AI pass)
+    # and after final template so users can tune options. Card level stays clean; submenu shows 🔹.
+    n_feat_rows = 0
+    feat_keys: list[str] = []
+    if feach_data:
         features = feach_data.get("features") or {}
+        feat_keys = list(features.keys())
         for feat_key, feat in features.items():
             label = btn_label(
                 str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
@@ -174,6 +181,16 @@ def build_prompt_generation_menu(
                     callback_data=f"admin:feach:{prompt_id}:{feat_key}",
                 )
             ])
+            n_feat_rows += 1
+
+    logger.info(
+        "build_prompt_generation_menu: prompt_id=%s is_draft=%s feach_keys=%s n_feature_rows=%s total_keyboard_rows_so_far=%s",
+        prompt_id,
+        is_draft,
+        feat_keys,
+        n_feat_rows,
+        len(rows),
+    )
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="🪄 Generate Prompt from Draft", callback_data=f"admin:final:{prompt_id}")])
