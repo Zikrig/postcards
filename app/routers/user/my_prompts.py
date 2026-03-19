@@ -35,7 +35,7 @@ async def _send_primary_onboard_step(
     await message.answer(
         f"Variable: {varname}\nAbout: {about}",
         reply_markup=build_feature_config_menu(
-            prompt_id, k, feat, back_callback=back_cb
+            prompt_id, k, feat, back_callback=back_cb, show_dont_specify=True
         ),
     )
 
@@ -169,7 +169,7 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
                 reply_markup=build_feature_config_menu(
-                    prompt_id, k, feat, back_callback=back_cb
+                    prompt_id, k, feat, back_callback=back_cb, show_dont_specify=True
                 ),
             )
         except TelegramBadRequest:
@@ -281,9 +281,9 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
                 )
                 await state.set_state(PrimaryPromptOnboardingStates.reviewing_variables)
                 await message.answer(
-                    "Draft prompt is ready! Configure the prompt variables now. "
-                    "You and other users will be able to choose different values from the options you enable.\n\n"
-                    "You can keep a variable with a single preset value, or remove the variable entirely. "
+                    "Draft prompt is ready! Configure the prompt variables now.\n"
+                    "You and other users will be able to choose values from the options you enable.\n\n"
+                    "You can choose only one value later, or remove this variable entirely by pressing `dont specify`.\n"
                     "Optionally, you can allow users to provide their own text."
                 )
                 await _send_primary_onboard_step(message, ctx, prompt_id, keys, feats, 0)

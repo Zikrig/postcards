@@ -303,6 +303,79 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                 pass
         await callback.answer()
 
+    @router.callback_query(F.data.startswith("admin:nospec:"))
+    async def admin_nospec_feature(callback: CallbackQuery, state: FSMContext) -> None:
+        """
+        Draft UX helper: "dont specify" disables this feature entirely
+        so it won't be included as a prompt variable during final template generation.
+        """
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        parts = (callback.data or "").split(":")
+        if len(parts) < 4:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        feat_key = parts[3]
+
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if feat_key not in features:
+            await callback.answer("Feature not found", show_alert=True)
+            return
+
+        feat = features.get(feat_key)
+        if not isinstance(feat, dict):
+            feat = {}
+
+        # Disable feature entirely: no preset options, no custom, no my_own.
+        feat["my_own"] = False
+        opts = feat.get("options") or {}
+        if isinstance(opts, dict):
+            for _k, opt_v in opts.items():
+                if isinstance(opt_v, dict):
+                    opt_v["enabled"] = False
+        feat["options"] = opts
+        feat["custom"] = []
+        features[feat_key] = feat
+        feach_data["features"] = features
+
+        await ctx.repo.update_prompt_feach_data(prompt_id, feach_data)
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
+            try:
+                await callback.message.edit_reply_markup(
+                    reply_markup=build_feature_config_menu(
+                        prompt_id,
+                        feat_key,
+                        feach_data.get("features", {}).get(feat_key, {}),
+                        back_callback=back_cb,
+                        show_dont_specify=True,
+                    )
+                )
+            except TelegramBadRequest:
+                pass
+
+        await callback.answer("Variable disabled")
+
     @router.callback_query(F.data.startswith("admin:featdel:"))
     async def admin_feature_delete(callback: CallbackQuery) -> None:
         if not callback.message:

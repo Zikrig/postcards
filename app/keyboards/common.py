@@ -27,10 +27,21 @@ def build_feature_config_menu(
     feat_key: str,
     feature: dict[str, Any],
     back_callback: Optional[str] = None,
+    show_dont_specify: bool = False,
 ) -> InlineKeyboardMarkup:
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
     rows = []
+    if show_dont_specify:
+        # Disables the feature entirely so it won't be included in generated prompt variables.
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="dont specify",
+                    callback_data=f"admin:nospec:{prompt_id}:{feat_key}",
+                )
+            ]
+        )
     for opt_key, opt_val in opts.items():
         text_short = btn_label(opt_key, 20)
         enabled = get_feach_option_enabled(opt_val)
