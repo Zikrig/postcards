@@ -280,6 +280,12 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
                     ponboard_idx=0,
                 )
                 await state.set_state(PrimaryPromptOnboardingStates.reviewing_variables)
+                await message.answer(
+                    "Draft prompt is ready! Configure the prompt variables now. "
+                    "You and other users will be able to choose different values from the options you enable.\n\n"
+                    "You can keep a variable with a single preset value, or remove the variable entirely. "
+                    "Optionally, you can allow users to provide their own text."
+                )
                 await _send_primary_onboard_step(message, ctx, prompt_id, keys, feats, 0)
             else:
                 await ctx.send_prompt_generation_menu(message, prompt_id, message.from_user.id)
