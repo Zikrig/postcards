@@ -193,21 +193,14 @@ def build_prompt_generation_menu(
     )
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="🪄 Generate postcard from Draft",
-                callback_data=f"admin:final:{prompt_id}",
-            )
-        ]
-    )
 
+    # UX: allow deleting only while the prompt is still a draft
+    # (before "Generate Prompt from Draft" creates the final template).
     if is_draft:
-        # Only during primary generation (before prompt template is generated yet).
-        rows.append([InlineKeyboardButton(text="Cancel", callback_data=back_callback)])
         rows.append([InlineKeyboardButton(text="🗑 Delete", callback_data=f"admin:delete:{prompt_id}")])
-    else:
-        rows.append([InlineKeyboardButton(text="◀ Back to prompt", callback_data=back_callback)])
+
+    rows.append([InlineKeyboardButton(text="🪄 Generate Prompt from Draft", callback_data=f"admin:final:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="◀ Back to prompt", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
