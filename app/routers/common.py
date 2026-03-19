@@ -538,7 +538,7 @@ class RouterCtx:
         )
         try:
             await message.edit_text(text, reply_markup=markup)
-        except TelegramBadRequest:
+        except Exception:
             await message.answer(text, reply_markup=markup)
 
     async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:

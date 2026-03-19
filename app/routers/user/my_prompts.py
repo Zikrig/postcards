@@ -1,5 +1,6 @@
 """User flow: my prompts listing, prompt creation."""
 import logging
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
