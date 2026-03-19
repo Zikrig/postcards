@@ -19,13 +19,7 @@ from app.keyboards.common import (
     build_final_wizard_step_keyboard,
 )
 from app.states import AdminStates, FinalPromptSetupStates, PrimaryPromptOnboardingStates
-from app.utils import (
-    ensure_dict,
-    get_feach_option_enabled,
-    get_feach_option_text,
-    prompt_record_is_draft,
-    variable_token,
-)
+from app.utils import ensure_dict, get_feach_option_enabled, get_feach_option_text, variable_token
 from app.routers.common import RouterCtx
 
 
@@ -220,7 +214,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
         back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-        show_dont = prompt_record_is_draft(prompt)
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
@@ -229,7 +222,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     feat_key,
                     feat,
                     back_callback=back_cb,
-                    show_dont_specify=show_dont,
                 ),
             )
         except TelegramBadRequest:
@@ -240,7 +232,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     feat_key,
                     feat,
                     back_callback=back_cb,
-                    show_dont_specify=show_dont,
                 ),
             )
         await callback.answer()
@@ -309,7 +300,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            show_dont = prompt_record_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -317,7 +307,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     )
                 )
             except TelegramBadRequest:
@@ -397,7 +386,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             varname = nf.get("varname", k)
             about = nf.get("about", "")
             back_cb = f"user:ponboard_feat_back:{prompt_id}:{new_idx}"
-            show_dont = prompt_record_is_draft(prompt)
             try:
                 await callback.message.edit_text(
                     f"Variable: {varname}\nAbout: {about}",
@@ -406,7 +394,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         k,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     ),
                 )
             except TelegramBadRequest:
@@ -417,7 +404,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         k,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     ),
                 )
             await callback.answer("Variable removed")
@@ -521,7 +507,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            show_dont = prompt_record_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -529,7 +514,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     )
                 )
             except TelegramBadRequest:
@@ -630,7 +614,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     str(feat_key),
                     feach_data.get("features", {}).get(feat_key, {}),
                     back_callback=back_cb,
-                    show_dont_specify=prompt_record_is_draft(prompt),
                 ),
             )
 
@@ -675,7 +658,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                 await state.clear()
                 await callback.answer("Prompt not found", show_alert=True)
                 return
-            show_dont = prompt_record_is_draft(prompt)
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             feats = feach_data.get("features") or {}
             if not isinstance(feats, dict):
@@ -693,7 +675,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         next_key,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     ),
                 )
             except TelegramBadRequest:
@@ -704,7 +685,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         next_key,
                         nf,
                         back_callback=back_cb,
-                        show_dont_specify=show_dont,
                     ),
                 )
             await callback.answer()

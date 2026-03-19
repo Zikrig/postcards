@@ -27,7 +27,7 @@ def build_feature_config_menu(
     feat_key: str,
     feature: dict[str, Any],
     back_callback: Optional[str] = None,
-    show_dont_specify: bool = False,
+    show_dont_specify: bool = True,
 ) -> InlineKeyboardMarkup:
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
@@ -61,7 +61,7 @@ def build_feature_config_menu(
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
     if show_dont_specify:
-        # Draft setup: remove variable from feach and exit to the generation menu / next step.
+        # Remove variable from feach and exit to generation menu / onboarding next step.
         rows.append(
             [
                 InlineKeyboardButton(
