@@ -214,15 +214,30 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
         back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
+        # Show "dont specify" only during primary onboarding draft editing.
+        cur_state = await state.get_state()
+        show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat, back_callback=back_cb),
+                reply_markup=build_feature_config_menu(
+                    prompt_id,
+                    feat_key,
+                    feat,
+                    back_callback=back_cb,
+                    show_dont_specify=show_dont,
+                ),
             )
         except TelegramBadRequest:
             await callback.message.answer(
                 f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, feat_key, feat, back_callback=back_cb),
+                reply_markup=build_feature_config_menu(
+                    prompt_id,
+                    feat_key,
+                    feat,
+                    back_callback=back_cb,
+                    show_dont_specify=show_dont,
+                ),
             )
         await callback.answer()
 
@@ -290,6 +305,8 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
+            cur_state = await state.get_state()
+            show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -297,6 +314,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
                         back_callback=back_cb,
+                        show_dont_specify=show_dont,
                     )
                 )
             except TelegramBadRequest:
@@ -471,6 +489,8 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
+            cur_state = await state.get_state()
+            show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -478,6 +498,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
                         back_callback=back_cb,
+                        show_dont_specify=show_dont,
                     )
                 )
             except TelegramBadRequest:
@@ -578,6 +599,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     str(feat_key),
                     feach_data.get("features", {}).get(feat_key, {}),
                     back_callback=back_cb,
+                    show_dont_specify=has_ponboard,
                 ),
             )
 
@@ -635,14 +657,22 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                 await callback.message.edit_text(
                     f"Variable: {varname}\nAbout: {about}",
                     reply_markup=build_feature_config_menu(
-                        prompt_id, next_key, nf, back_callback=back_cb
+                        prompt_id,
+                        next_key,
+                        nf,
+                        back_callback=back_cb,
+                        show_dont_specify=True,
                     ),
                 )
             except TelegramBadRequest:
                 await callback.message.answer(
                     f"Variable: {varname}\nAbout: {about}",
                     reply_markup=build_feature_config_menu(
-                        prompt_id, next_key, nf, back_callback=back_cb
+                        prompt_id,
+                        next_key,
+                        nf,
+                        back_callback=back_cb,
+                        show_dont_specify=True,
                     ),
                 )
             await callback.answer()
