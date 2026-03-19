@@ -13,6 +13,7 @@ from app.final_prompt_wizard import (
     build_variables_spec_from_wizard_choices,
     build_variables_spec_legacy_no_wizard,
 )
+from app.keyboards.admin import build_prompt_generation_menu
 from app.keyboards.common import (
     build_draft_variable_settings_menu,
     build_feature_config_menu,
@@ -24,6 +25,112 @@ from app.routers.common import RouterCtx
 
 
 def register_shared_features(router: Router, ctx: RouterCtx) -> None:
+    async def _reopen_prompt_card_message(message: Message, prompt_id: int, viewer_tg_id: int) -> None:
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if prompt:
+            await ctx.present_prompt_card(message, prompt, viewer_tg_id)
+
+    async def _send_final_wizard_step(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        prompt_id = data.get("final_wizard_prompt_id")
+        keys: list[str] = data.get("final_wizard_keys") or []
+        meta: list[dict[str, Any]] = data.get("final_wizard_meta") or []
+        idx = int(data.get("final_wizard_idx", 0))
+        if prompt_id is None or not keys or idx < 0 or idx >= len(keys):
+            await message.answer("Wizard session expired or invalid step.")
+            await state.clear()
+            return
+        prompt = await ctx.repo.get_prompt_by_id(int(prompt_id))
+        if not prompt:
+            await message.answer("Prompt not found.")
+            await state.clear()
+            return
+        feat_key = keys[idx]
+        m = meta[idx]
+        mode = str(m.get("mode") or "pick")
+        opts: list[str] = list(m.get("enabled_opts") or [])
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        feat = features.get(feat_key) or {}
+        if not isinstance(feat, dict):
+            feat = {}
+        varname = feat.get("varname", feat_key)
+        about = str(feat.get("about") or "").strip()
+        step_n = idx + 1
+        total = len(keys)
+        header = f"Step {step_n}/{total}: {varname}"
+        text = f"{header}\n{about}" if about else header
+        kb = build_final_wizard_step_keyboard(int(prompt_id), idx, opts, mode)
+        await message.answer(text, reply_markup=kb)
+
+    async def _run_final_deepseek_generate(
+        message: Message,
+        prompt_id: int,
+        idea: str,
+        variables_spec: list[dict[str, Any]],
+        user_tg_id: int,
+    ) -> None:
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await message.answer("Prompt not found.")
+            return
+        progress_msg = await message.answer("Generating final prompt…")
+        try:
+            result = await ctx.deepseek.generate_final_prompt(idea, variables_spec)
+        except Exception as e:
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+            await message.answer(f"DeepSeek error: {e}")
+            return
+        template = str(result.get("template") or "")
+        var_descriptions = ensure_dict(result.get("variable_descriptions") or {})
+        if "[USER_PHOTO]" in template:
+            var_descriptions["[USER_PHOTO]"] = {
+                "description": "Reference photo of the person",
+                "options": [],
+                "allow_custom": True,
+                "type": "image",
+            }
+        await ctx.repo.update_prompt(
+            prompt_id,
+            str(prompt["title"]),
+            template,
+            var_descriptions,
+            prompt.get("reference_photo_file_id"),
+        )
+        desc = (result.get("description") or "").strip()
+        if desc:
+            await ctx.repo.update_prompt_description(prompt_id, desc)
+        try:
+            await progress_msg.delete()
+        except Exception:
+            pass
+        await message.answer("Final prompt saved. You can tune variables below or go back to the prompt card.")
+        updated = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not updated:
+            return
+        feach_data = ensure_dict(updated.get("feach_data") or {})
+        draft_idea = feach_data.get("idea", "")
+        tmpl = str(updated.get("template") or "")
+        is_draft = (
+            (tmpl == draft_idea)
+            or (not tmpl)
+            or (tmpl == "Your prompt template here")
+        )
+        is_owner = updated.get("owner_tg_id") == user_tg_id
+        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
+        await message.answer(
+            "Prompt Generation Menu:\nChoose what to do:",
+            reply_markup=build_prompt_generation_menu(
+                prompt_id,
+                is_draft=is_draft,
+                back_callback=back_cb,
+                feach_data=feach_data,
+            ),
+        )
+
     @router.callback_query(F.data.startswith("admin:feach:"))
     async def admin_feach_feature(callback: CallbackQuery) -> None:
         if not callback.message:
