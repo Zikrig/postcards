@@ -215,8 +215,19 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         about = feat.get("about", "")
         back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
         # Show "dont specify" only during primary onboarding draft editing.
+        # Depending on where user came from, FSM state might not be exactly
+        # `reviewing_variables`, but session data `ponboard_prompt_id` should exist.
         cur_state = await state.get_state()
-        show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+        state_data = await state.get_data()
+        ponboard_prompt_id = state_data.get("ponboard_prompt_id")
+        try:
+            ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
+        except (TypeError, ValueError):
+            ponboard_prompt_id_int = None
+        show_dont = (
+            cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+            or (ponboard_prompt_id_int == prompt_id)
+        )
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
@@ -306,7 +317,16 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
             cur_state = await state.get_state()
-            show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+            state_data = await state.get_data()
+            ponboard_prompt_id = state_data.get("ponboard_prompt_id")
+            try:
+                ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
+            except (TypeError, ValueError):
+                ponboard_prompt_id_int = None
+            show_dont = (
+                cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+                or (ponboard_prompt_id_int == prompt_id)
+            )
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -490,7 +510,16 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
             cur_state = await state.get_state()
-            show_dont = cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+            state_data = await state.get_data()
+            ponboard_prompt_id = state_data.get("ponboard_prompt_id")
+            try:
+                ponboard_prompt_id_int = int(ponboard_prompt_id) if ponboard_prompt_id is not None else None
+            except (TypeError, ValueError):
+                ponboard_prompt_id_int = None
+            show_dont = (
+                cur_state == PrimaryPromptOnboardingStates.reviewing_variables
+                or (ponboard_prompt_id_int == prompt_id)
+            )
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
