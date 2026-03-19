@@ -335,7 +335,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
     @router.callback_query(F.data.startswith("admin:nospec:"))
     async def admin_nospec_feature(callback: CallbackQuery, state: FSMContext) -> None:
         """
-        Draft UX helper: "dont specify" disables this feature entirely
+        Draft UX helper: "Dont specify" disables this feature entirely
         so it won't be included as a prompt variable during final template generation.
         """
         if not callback.message:

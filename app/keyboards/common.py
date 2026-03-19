@@ -32,16 +32,7 @@ def build_feature_config_menu(
     opts = feature.get("options") or {}
     custom = list(feature.get("custom") or [])
     rows = []
-    if show_dont_specify:
-        # Disables the feature entirely so it won't be included in generated prompt variables.
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="dont specify",
-                    callback_data=f"admin:nospec:{prompt_id}:{feat_key}",
-                )
-            ]
-        )
+
     for opt_key, opt_val in opts.items():
         text_short = btn_label(opt_key, 20)
         enabled = get_feach_option_enabled(opt_val)
@@ -69,6 +60,16 @@ def build_feature_config_menu(
         InlineKeyboardButton(text="ON" if my_own else "OFF", callback_data=f"admin:myown:{prompt_id}:{feat_key}"),
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
+    if show_dont_specify:
+        # Disables the feature entirely so it won't be included in generated prompt variables.
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Dont specify",
+                    callback_data=f"admin:nospec:{prompt_id}:{feat_key}",
+                )
+            ]
+        )
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
     back_cb = back_callback or f"menu:my_prompt_item:{prompt_id}"
     rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
