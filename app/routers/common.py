@@ -513,7 +513,14 @@ class RouterCtx:
             or (template == "Your prompt template here")
         )
         is_owner = prompt.get("owner_tg_id") == viewer_tg_id
-        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
+        # Back behavior:
+        # - for draft prompts opened by the owner: go back to the folder (My prompts list),
+        #   not into the prompt-card "edit menu" flow.
+        # - otherwise keep the default back-to-prompt-card behavior.
+        if is_owner and is_draft:
+            back_cb = "menu:my_prompts:0"
+        else:
+            back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
         feat_n = len(feach_data.get("features") or {})
         logger.info(
             "send_prompt_generation_menu: prompt_id=%s viewer=%s is_draft=%s n_features=%s",
@@ -522,15 +529,17 @@ class RouterCtx:
             is_draft,
             feat_n,
         )
-        await message.answer(
-            "Prompt Generation Menu:\nChoose what to do:",
-            reply_markup=build_prompt_generation_menu(
-                prompt_id,
-                is_draft=is_draft,
-                back_callback=back_cb,
-                feach_data=feach_data,
-            ),
+        text = "Prompt Generation Menu:\nChoose what to do:"
+        markup = build_prompt_generation_menu(
+            prompt_id,
+            is_draft=is_draft,
+            back_callback=back_cb,
+            feach_data=feach_data,
         )
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except TelegramBadRequest:
+            await message.answer(text, reply_markup=markup)
 
     async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:
         """

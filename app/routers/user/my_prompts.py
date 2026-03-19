@@ -1,6 +1,5 @@
 """User flow: my prompts listing, prompt creation."""
 import logging
-from typing import Any
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -86,6 +85,18 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
         )
         if not is_owner and not is_admin:
             await callback.answer("Not your prompt", show_alert=True)
+            return
+
+        # If draft primary-variable editing wasn't finished, we should open the
+        # Prompt Generation Menu directly (draft cards are intentionally "minimal").
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        draft_idea = feach_data.get("idea", "")
+        template = str(prompt.get("template") or "")
+        is_draft = (template == draft_idea) or (not template) or (template == "Your prompt template here")
+
+        if is_draft:
+            await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
+            await callback.answer()
             return
 
         await ctx.present_prompt_card(
