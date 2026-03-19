@@ -61,15 +61,20 @@ def build_prompts_by_tag_menu(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_prompt_preview_menu(prompt_id: int, back_callback: str = "menu:main") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🚀 Generate 1K (1 🪙)", callback_data=f"prompt:generate:1k:{prompt_id}")],
-            [InlineKeyboardButton(text="🚀 Generate 2K (2 🪙)", callback_data=f"prompt:generate:2k:{prompt_id}")],
-            [InlineKeyboardButton(text="🚀 Generate 4K (4 🪙)", callback_data=f"prompt:generate:4k:{prompt_id}")],
-            [InlineKeyboardButton(text="◀ Back", callback_data=back_callback)],
-        ]
-    )
+def build_prompt_preview_menu(
+    prompt_id: int,
+    back_callback: str = "menu:main",
+    show_test: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="🚀 Generate 1K (1 🪙)", callback_data=f"prompt:generate:1k:{prompt_id}")],
+        [InlineKeyboardButton(text="🚀 Generate 2K (2 🪙)", callback_data=f"prompt:generate:2k:{prompt_id}")],
+        [InlineKeyboardButton(text="🚀 Generate 4K (4 🪙)", callback_data=f"prompt:generate:4k:{prompt_id}")],
+    ]
+    if show_test:
+        rows.append([InlineKeyboardButton(text="🧪 Test (1 🪙)", callback_data=f"admin:test:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_my_prompts_menu(
@@ -108,35 +113,24 @@ def build_user_prompt_card(
         or ("[" not in template and "<" not in template)
     )
 
-    if is_draft:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="⚙️ Variable settings",
-                    callback_data=f"admin:dfm:{prompt_id}",
-                )
-            ]
-        )
-    else:
+    if not is_draft:
         for feat_key, feat in features.items():
-            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+            label = btn_label(
+                str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
+                18,
+            )
             rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
 
-    rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}")])
-
-    if not is_draft:
         rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="1 🪙 Test", callback_data=f"admin:test:{prompt_id}")])
         rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
         pub_label = "🔒 Make Private" if is_public else "🟢 Make Public"
         rows.append([InlineKeyboardButton(text=pub_label, callback_data=f"admin:toggle_public:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
 
-    if show_clone and not is_draft:
-        rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
+    # Generation-related operations moved to a submenu
+    rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
 
-    rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
+    # Edit menu renamed (export/delete/clone moved inside it)
+    rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
+
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -500,14 +500,24 @@ class RouterCtx:
           - False → юзерский флоу (Back to list → menu:my_prompts:0)
           - None  → autodetect по prompt.owner_tg_id и user.is_admin (вызывающий код может пробросить явно)
         """
-        ref_id = prompt.get("reference_photo_file_id")
-        example_ids = self.normalize_example_file_ids(prompt.get("example_file_ids"))
+        # Clone is shown only for admins and only when prompt is not in "draft" state.
+        viewer_is_admin = bool(message.from_user and message.from_user.id in self.settings.admin_ids)
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        draft_idea = feach_data.get("idea", "")
+        template = str(prompt.get("template") or "")
+        is_draft = (
+            (template == draft_idea)
+            or (not template)
+            or (template == "Your prompt template here")
+            or ("[" not in template and "<" not in template)
+        )
+
         logger.info(
-            "show_prompt_edit_actions: prompt_id=%s title=%r ref_id=%r examples=%r is_admin_view=%r",
+            "show_prompt_edit_actions: prompt_id=%s title=%r is_draft=%r viewer_is_admin=%r is_admin_view=%r",
             prompt.get("id"),
             prompt.get("title"),
-            ref_id,
-            example_ids,
+            is_draft,
+            viewer_is_admin,
             is_admin_view,
         )
         # Определяем, куда должен вести Back:
@@ -520,7 +530,12 @@ class RouterCtx:
             "Prompt edit menu:\n"
             f"Title: {prompt['title']}\n"
             "Choose what to change:",
-            reply_markup=build_prompt_edit_menu(int(prompt["id"]), back_callback=back_cb),
+            reply_markup=build_prompt_edit_menu(
+                int(prompt["id"]),
+                back_callback=back_cb,
+                show_clone=viewer_is_admin,
+                is_draft=is_draft,
+            ),
         )
 
     async def persist_prompt_edit_state(self, state: FSMContext) -> Optional[asyncpg.Record]:

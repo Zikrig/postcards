@@ -35,6 +35,9 @@ def register_user_generation(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
             return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        show_test = is_admin or is_owner
         desc = (prompt.get("description") or prompt.get("title") or "").strip() or str(prompt.get("title", ""))
         raw_examples = prompt.get("example_file_ids") or []
         if isinstance(raw_examples, str):
@@ -45,7 +48,7 @@ def register_user_generation(router: Router, ctx: RouterCtx) -> None:
         if not isinstance(raw_examples, list):
             raw_examples = []
         example_ids = [str(f) for f in raw_examples[:3] if f]
-        markup = build_prompt_preview_menu(prompt_id, back_callback="menu:main")
+        markup = build_prompt_preview_menu(prompt_id, back_callback="menu:main", show_test=show_test)
         if example_ids:
             try:
                 await callback.message.answer_photo(

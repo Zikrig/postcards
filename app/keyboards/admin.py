@@ -110,7 +110,7 @@ def build_admin_user_prompts_menu(
 
 def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")],
+        [InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")],
         [InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")],
         [InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")],
         [InlineKeyboardButton(
@@ -124,17 +124,42 @@ def build_prompt_item_menu(prompt_id: int, is_active: bool = True) -> InlineKeyb
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_edit_menu(prompt_id: int, back_callback: str = "admin:pw:list") -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
-            [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
-            [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
-            [InlineKeyboardButton(text="🖼 Images & examples", callback_data=f"admin:editpart:images:{prompt_id}")],
-            [InlineKeyboardButton(text="📥 Import JSON", callback_data=f"admin:editpart:import_json:{prompt_id}")],
-            [InlineKeyboardButton(text="Back to list", callback_data=back_callback)],
-        ]
-    )
+def build_prompt_edit_menu(
+    prompt_id: int,
+    back_callback: str = "admin:pw:list",
+    show_clone: bool = False,
+    is_draft: bool = False,
+) -> InlineKeyboardMarkup:
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
+        [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
+        [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
+        [InlineKeyboardButton(text="🖼 Images & examples", callback_data=f"admin:editpart:images:{prompt_id}")],
+        [InlineKeyboardButton(text="📥 Import JSON", callback_data=f"admin:editpart:import_json:{prompt_id}")],
+        [InlineKeyboardButton(text="📤 Export JSON", callback_data=f"admin:export:{prompt_id}")],
+        [InlineKeyboardButton(text="🗑 Delete", callback_data=f"admin:delete:{prompt_id}")],
+    ]
+
+    if show_clone and not is_draft:
+        rows.append([InlineKeyboardButton(text="🧩 Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
+
+    rows.append([InlineKeyboardButton(text="◀ Back to list", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_prompt_generation_menu(prompt_id: int, is_draft: bool, back_callback: str) -> InlineKeyboardMarkup:
+    """
+    Submenu for draft → final template and variable configuration.
+    Actual image generation is triggered separately by the prompt card.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if is_draft:
+        rows.append([InlineKeyboardButton(text="⚙️ Variable settings", callback_data=f"admin:dfm:{prompt_id}")])
+
+    rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="🪄 Generate Prompt from Draft", callback_data=f"admin:final:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="◀ Back to prompt", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def build_prompt_edit_images_menu(prompt_id: int) -> InlineKeyboardMarkup:
@@ -276,38 +301,25 @@ def build_admin_prompt_card(
         or ("[" not in template and "<" not in template)
     )
 
-    if is_draft:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text="⚙️ Variable settings",
-                    callback_data=f"admin:dfm:{prompt_id}",
-                )
-            ]
-        )
-    else:
+    if not is_draft:
         for feat_key, feat in features.items():
             label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
             rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
-
-    rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}")])
+    # Variables & "draft → final template" moved to a submenu
+    rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
 
     if not is_draft:
         rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")])
         rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-        rows.append([InlineKeyboardButton(
-            text="Deactivate" if is_active else "Activate",
-            callback_data=f"admin:active:{prompt_id}",
-        )])
-        rows.append([InlineKeyboardButton(text="Edit", callback_data=f"admin:edit:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
+        rows.append(
+            [InlineKeyboardButton(
+                text="Deactivate" if is_active else "Activate",
+                callback_data=f"admin:active:{prompt_id}",
+            )]
+        )
 
-    if show_clone and not is_draft:
-        rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
-
-    rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
+    # Export/Delete/Clone moved into Prompt Edit menu
+    rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -331,10 +343,8 @@ def build_admin_community_card(
 
     if not is_draft:
         rows.append([InlineKeyboardButton(text="🚀 Generate (Free)", callback_data=f"prompt:select:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Test (Free)", callback_data=f"admin:test:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Export JSON", callback_data=f"admin:export:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Clone to All (System)", callback_data=f"admin:clone:{prompt_id}")])
 
-    rows.append([InlineKeyboardButton(text="Delete", callback_data=f"admin:delete:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)

@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from app.keyboards.admin import build_prompt_edit_images_menu
+from app.keyboards.admin import build_prompt_edit_images_menu, build_prompt_generation_menu
 from app.states import AdminStates
 from app.utils import ensure_dict, extract_variables
 from app.routers.common import RouterCtx
@@ -43,6 +43,49 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         # - админ, редактирующий системный или чужой промпт → админский Back (admin list)
         is_admin_view = not is_owner
         await ctx.show_prompt_edit_actions(callback.message, prompt, is_admin_view=is_admin_view)
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:genmenu:"))
+    async def admin_prompt_generation_menu(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        draft_idea = feach_data.get("idea", "")
+        template = str(prompt.get("template") or "")
+        is_draft = (
+            (template == draft_idea)
+            or (not template)
+            or (template == "Your prompt template here")
+            or ("[" not in template and "<" not in template)
+        )
+
+        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
+        await callback.message.answer(
+            "Prompt Generation Menu:\nChoose what to do:",
+            reply_markup=build_prompt_generation_menu(prompt_id, is_draft=is_draft, back_callback=back_cb),
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:images:"))
