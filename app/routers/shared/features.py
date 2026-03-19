@@ -13,7 +13,6 @@ from app.final_prompt_wizard import (
     build_variables_spec_from_wizard_choices,
     build_variables_spec_legacy_no_wizard,
 )
-from app.keyboards.admin import build_prompt_generation_menu
 from app.keyboards.common import (
     build_draft_variable_settings_menu,
     build_feature_config_menu,
@@ -107,39 +106,16 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             await progress_msg.delete()
         except Exception:
             pass
-        await message.answer("Final prompt saved. You can tune variables below or go back to the prompt card.")
+        await message.answer("Final prompt saved — full controls are unlocked on the card below.")
         updated = await ctx.repo.get_prompt_by_id(prompt_id)
         if not updated:
             return
-        feach_data = ensure_dict(updated.get("feach_data") or {})
-        draft_idea = feach_data.get("idea", "")
-        tmpl = str(updated.get("template") or "")
-        is_draft = (
-            (tmpl == draft_idea)
-            or (not tmpl)
-            or (tmpl == "Your prompt template here")
-        )
-        features = feach_data.get("features") or {}
-        feat_keys = list(features.keys()) if isinstance(features, dict) else []
         logging.info(
-            "_run_final_deepseek_generate: opening gen menu prompt_id=%s is_draft=%s tmpl_eq_idea=%s n_features=%s feature_keys=%s",
+            "_run_final_deepseek_generate: presenting full prompt card prompt_id=%s viewer=%s",
             prompt_id,
-            is_draft,
-            tmpl == (draft_idea or ""),
-            len(feat_keys),
-            feat_keys,
+            user_tg_id,
         )
-        is_owner = updated.get("owner_tg_id") == user_tg_id
-        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
-        await message.answer(
-            "Prompt Generation Menu:\nChoose what to do:",
-            reply_markup=build_prompt_generation_menu(
-                prompt_id,
-                is_draft=is_draft,
-                back_callback=back_cb,
-                feach_data=feach_data,
-            ),
-        )
+        await ctx.present_prompt_card(message, updated, user_tg_id)
 
     @router.callback_query(F.data.startswith("admin:feach:"))
     async def admin_feach_feature(callback: CallbackQuery) -> None:

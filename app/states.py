@@ -44,3 +44,8 @@ class GenerateStates(StatesGroup):
 class FinalPromptSetupStates(StatesGroup):
     """Step-by-step variable choices before DeepSeek «generate final template»."""
     choosing = State()
+
+
+class PrimaryPromptOnboardingStates(StatesGroup):
+    """After refine_idea: show each variable (read-only), then Prompt Generation Menu."""
+    reviewing_variables = State()

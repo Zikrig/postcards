@@ -6,7 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from app.keyboards.admin import build_prompt_edit_images_menu, build_prompt_generation_menu
+from app.keyboards.admin import build_prompt_edit_images_menu
 from app.states import AdminStates
 from app.utils import ensure_dict, extract_variables
 from app.routers.common import RouterCtx
@@ -73,42 +73,8 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("No permission", show_alert=True)
             return
 
-        feach_data = ensure_dict(prompt.get("feach_data") or {})
-        draft_idea = feach_data.get("idea", "")
-        template = str(prompt.get("template") or "")
-        is_draft = (
-            (template == draft_idea)
-            or (not template)
-            or (template == "Your prompt template here")
-        )
-
-        features = feach_data.get("features") or {}
-        feat_keys = list(features.keys()) if isinstance(features, dict) else []
-        tmpl_eq_idea = template == (draft_idea or "")
-        logger.info(
-            "admin_prompt_generation_menu: prompt_id=%s is_draft=%s tmpl_eq_idea=%s template_len=%s draft_idea_len=%s "
-            "n_features=%s feature_keys=%s template_preview=%r idea_preview=%r",
-            prompt_id,
-            is_draft,
-            tmpl_eq_idea,
-            len(template),
-            len(str(draft_idea or "")),
-            len(feat_keys),
-            feat_keys,
-            (template[:120] + "…") if len(template) > 120 else template,
-            ((draft_idea or "")[:120] + "…") if len(str(draft_idea or "")) > 120 else (draft_idea or ""),
-        )
-
-        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
-        await callback.message.answer(
-            "Prompt Generation Menu:\nChoose what to do:",
-            reply_markup=build_prompt_generation_menu(
-                prompt_id,
-                is_draft=is_draft,
-                back_callback=back_cb,
-                feach_data=feach_data,
-            ),
-        )
+        logger.info("admin_prompt_generation_menu: prompt_id=%s viewer=%s", prompt_id, callback.from_user.id)
+        await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:editpart:images:"))

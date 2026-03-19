@@ -65,6 +65,7 @@ from app.keyboards.admin import (
     build_prompt_edit_menu,
     build_prompt_edit_variable_actions_menu,
     build_prompt_edit_variables_menu,
+    build_prompt_generation_menu,
 )
 from app.repo import Repo
 from app.states import AdminStates
@@ -491,6 +492,45 @@ class RouterCtx:
             except TelegramBadRequest:
                 await message.answer(text, reply_markup=markup)
             await send_reference_followup()
+
+    async def send_prompt_generation_menu(
+        self,
+        message: Message,
+        prompt_id: int,
+        viewer_tg_id: int,
+    ) -> None:
+        """Same keyboard as admin:genmenu — used after onboarding and from genmenu callback."""
+        prompt = await self.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await message.answer("Prompt not found.")
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        draft_idea = feach_data.get("idea", "")
+        template = str(prompt.get("template") or "")
+        is_draft = (
+            (template == draft_idea)
+            or (not template)
+            or (template == "Your prompt template here")
+        )
+        is_owner = prompt.get("owner_tg_id") == viewer_tg_id
+        back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
+        feat_n = len(feach_data.get("features") or {})
+        logger.info(
+            "send_prompt_generation_menu: prompt_id=%s viewer=%s is_draft=%s n_features=%s",
+            prompt_id,
+            viewer_tg_id,
+            is_draft,
+            feat_n,
+        )
+        await message.answer(
+            "Prompt Generation Menu:\nChoose what to do:",
+            reply_markup=build_prompt_generation_menu(
+                prompt_id,
+                is_draft=is_draft,
+                back_callback=back_cb,
+                feach_data=feach_data,
+            ),
+        )
 
     async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:
         """

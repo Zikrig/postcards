@@ -92,6 +92,26 @@ def build_my_prompts_menu(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def build_primary_variable_continue_keyboard(
+    prompt_id: int, step_idx: int, total: int,
+) -> InlineKeyboardMarkup:
+    """Onboarding: no variable option rows — only ◀ Back (optional) + forward (▶ Next / gen menu)."""
+    is_last = step_idx >= total - 1
+    nav: list[InlineKeyboardButton] = []
+    if step_idx > 0:
+        nav.append(
+            InlineKeyboardButton(
+                text="◀ Back",
+                callback_data=f"user:ponboard_prev:{prompt_id}:{step_idx}",
+            )
+        )
+    label = "▶ Open Prompt Generation menu" if is_last else "▶ Next"
+    nav.append(
+        InlineKeyboardButton(text=label, callback_data=f"user:ponboard_next:{prompt_id}:{step_idx}")
+    )
+    return InlineKeyboardMarkup(inline_keyboard=[nav])
+
+
 def build_user_prompt_card(
     prompt_id: int,
     feach_data: dict[str, Any],
@@ -102,7 +122,6 @@ def build_user_prompt_card(
     show_clone: bool = False,
 ) -> InlineKeyboardMarkup:
     """Prompt card for the owner viewing their own prompt."""
-    features = feach_data.get("features") or {}
     rows: list[list[InlineKeyboardButton]] = []
 
     draft_idea = feach_data.get("idea", "")
@@ -112,19 +131,17 @@ def build_user_prompt_card(
         or (template == "Your prompt template here")
     )
 
-    if not is_draft:
-        # Variables/feature configuration should not be shown on the card level.
-        # It will be handled inside "Prompt Generation Menu" -> "Variable settings".
-        rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
-        rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
-        pub_label = "🔒 Make Private" if is_public else "🟢 Make Public"
-        rows.append([InlineKeyboardButton(text=pub_label, callback_data=f"admin:toggle_public:{prompt_id}")])
+    # Draft (before «Generate Prompt from Draft»): only return to list — full controls unlock after final template.
+    if is_draft:
+        rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    # Generation-related operations moved to a submenu
+    rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
+    pub_label = "🔒 Make Private" if is_public else "🟢 Make Public"
+    rows.append([InlineKeyboardButton(text=pub_label, callback_data=f"admin:toggle_public:{prompt_id}")])
+
     rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
-
-    # Edit menu renamed (export/delete/clone moved inside it)
     rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
-
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
