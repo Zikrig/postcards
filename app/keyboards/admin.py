@@ -147,12 +147,33 @@ def build_prompt_edit_menu(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def build_prompt_generation_menu(prompt_id: int, is_draft: bool, back_callback: str) -> InlineKeyboardMarkup:
+def build_prompt_generation_menu(
+    prompt_id: int,
+    is_draft: bool,
+    back_callback: str,
+    feach_data: Optional[dict[str, Any]] = None,
+) -> InlineKeyboardMarkup:
     """
     Submenu for draft → final template and variable configuration.
     Actual image generation is triggered separately by the prompt card.
     """
     rows: list[list[InlineKeyboardButton]] = []
+
+    # For final templates: show per-variable/feature configuration buttons inside this submenu.
+    # We intentionally do not show these buttons on the prompt card level.
+    if (not is_draft) and feach_data:
+        features = feach_data.get("features") or {}
+        for feat_key, feat in features.items():
+            label = btn_label(
+                str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
+                18,
+            )
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"🔹 {label}",
+                    callback_data=f"admin:feach:{prompt_id}:{feat_key}",
+                )
+            ])
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="🪄 Generate Prompt from Draft", callback_data=f"admin:final:{prompt_id}")])

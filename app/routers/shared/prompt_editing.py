@@ -91,7 +91,12 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
         await callback.message.answer(
             "Prompt Generation Menu:\nChoose what to do:",
-            reply_markup=build_prompt_generation_menu(prompt_id, is_draft=is_draft, back_callback=back_cb),
+            reply_markup=build_prompt_generation_menu(
+                prompt_id,
+                is_draft=is_draft,
+                back_callback=back_cb,
+                feach_data=feach_data,
+            ),
         )
         await callback.answer()
 
