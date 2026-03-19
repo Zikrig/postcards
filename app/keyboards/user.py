@@ -92,26 +92,6 @@ def build_my_prompts_menu(
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_primary_variable_continue_keyboard(
-    prompt_id: int, step_idx: int, total: int,
-) -> InlineKeyboardMarkup:
-    """Onboarding: no variable option rows — only ◀ Back (optional) + forward (▶ Next / gen menu)."""
-    is_last = step_idx >= total - 1
-    nav: list[InlineKeyboardButton] = []
-    if step_idx > 0:
-        nav.append(
-            InlineKeyboardButton(
-                text="◀ Back",
-                callback_data=f"user:ponboard_prev:{prompt_id}:{step_idx}",
-            )
-        )
-    label = "▶ Open Prompt Generation menu" if is_last else "▶ Next"
-    nav.append(
-        InlineKeyboardButton(text=label, callback_data=f"user:ponboard_next:{prompt_id}:{step_idx}")
-    )
-    return InlineKeyboardMarkup(inline_keyboard=[nav])
-
-
 def build_user_prompt_card(
     prompt_id: int,
     feach_data: dict[str, Any],

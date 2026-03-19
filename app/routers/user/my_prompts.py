@@ -3,41 +3,16 @@ import logging
 from typing import Any
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.keyboards.user import build_primary_variable_continue_keyboard
+from app.keyboards.common import build_feature_config_menu
 from app.states import AdminStates, PrimaryPromptOnboardingStates
-from app.utils import ensure_dict, get_feach_option_enabled, get_feach_option_text
+from app.utils import ensure_dict
 from app.routers.common import RouterCtx
 
 logger = logging.getLogger(__name__)
-
-
-def _format_primary_variable_text(
-    feat_key: str,
-    feat: dict[str, Any],
-    step_n: int,
-    total: int,
-) -> str:
-    varname = str(feat.get("varname") or feat_key)
-    about = str(feat.get("about") or "").strip()
-    header = f"Variable {step_n}/{total}: {varname}\n(key: {feat_key})"
-    lines = [header]
-    if about:
-        lines.append("")
-        lines.append(about)
-    opts = feat.get("options") or {}
-    if isinstance(opts, dict) and opts:
-        lines.append("")
-        lines.append("Options (read-only):")
-        for _ok, ov in opts.items():
-            if not get_feach_option_enabled(ov):
-                continue
-            t = get_feach_option_text(ov).strip()
-            if t:
-                lines.append(f" • {t}")
-    return "\n".join(lines)
 
 
 async def _send_primary_onboard_step(
@@ -48,15 +23,20 @@ async def _send_primary_onboard_step(
     feats: dict[str, Any],
     idx: int,
 ) -> None:
+    """Same variable editor as admin:feach (toggles, My own, Add option, Done, Back)."""
     total = len(keys)
     if idx < 0 or idx >= total:
         return
     k = keys[idx]
     feat = feats.get(k) if isinstance(feats.get(k), dict) else {}
-    text = _format_primary_variable_text(k, feat, idx + 1, total)
+    varname = feat.get("varname", k)
+    about = feat.get("about", "")
+    back_cb = f"user:ponboard_feat_back:{prompt_id}:{idx}"
     await message.answer(
-        text,
-        reply_markup=build_primary_variable_continue_keyboard(prompt_id, idx, total),
+        f"Variable: {varname}\nAbout: {about}",
+        reply_markup=build_feature_config_menu(
+            prompt_id, k, feat, back_callback=back_cb
+        ),
     )
 
 
@@ -116,95 +96,74 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
         )
         await callback.answer()
 
-    async def _ponboard_guard(
-        callback: CallbackQuery, state: FSMContext
-    ) -> tuple[int, list[str], int] | None:
-        current = await state.get_state()
-        if current != PrimaryPromptOnboardingStates.reviewing_variables:
+    @router.callback_query(F.data.startswith("user:ponboard_feat_back:"))
+    async def primary_onboard_feat_back(callback: CallbackQuery, state: FSMContext) -> None:
+        """During onboarding: Back → previous variable editor, or exit on first."""
+        if not callback.message:
+            return
+        cur = await state.get_state()
+        if cur != PrimaryPromptOnboardingStates.reviewing_variables:
             await callback.answer("This step is no longer active.", show_alert=True)
-            return None
+            return
         data = await state.get_data()
-        pid = data.get("ponboard_prompt_id")
-        keys = data.get("ponboard_keys") or []
-        if pid is None or not keys:
-            await callback.answer("Session expired.", show_alert=True)
-            await state.clear()
-            return None
-        try:
-            prompt_id = int(pid)
-        except (TypeError, ValueError):
-            await callback.answer("Session expired.", show_alert=True)
-            await state.clear()
-            return None
         parts = (callback.data or "").split(":")
         if len(parts) < 4:
             await callback.answer("Invalid", show_alert=True)
-            return None
+            return
         try:
-            step_idx = int(parts[-1])
+            prompt_id = int(parts[2])
+            step_idx = int(parts[3])
         except ValueError:
             await callback.answer("Invalid", show_alert=True)
-            return None
-        if step_idx < 0 or step_idx >= len(keys):
-            await callback.answer("Invalid step", show_alert=True)
-            return None
+            return
+        pid = data.get("ponboard_prompt_id")
+        keys = list(data.get("ponboard_keys") or [])
+        idx = int(data.get("ponboard_idx", 0))
+        if pid != prompt_id or idx != step_idx or not keys:
+            await callback.answer("Session out of sync.", show_alert=True)
+            return
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt or prompt.get("owner_tg_id") != callback.from_user.id:
             await callback.answer("Not your prompt", show_alert=True)
             await state.clear()
-            return None
-        return prompt_id, keys, step_idx
+            return
 
-    @router.callback_query(F.data.startswith("user:ponboard_next:"))
-    async def primary_onboard_next(callback: CallbackQuery, state: FSMContext) -> None:
-        if not callback.message:
-            return
-        guarded = await _ponboard_guard(callback, state)
-        if not guarded:
-            return
-        prompt_id, keys, step_idx = guarded
-        next_idx = step_idx + 1
-        await callback.answer()
-        if next_idx >= len(keys):
-            await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
-            await state.clear()
-            return
-        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
-        if not prompt:
-            await callback.message.answer("Prompt not found.")
-            await state.clear()
-            return
-        feach = ensure_dict(prompt.get("feach_data") or {})
-        feats = feach.get("features") or {}
-        if not isinstance(feats, dict):
-            feats = {}
-        await _send_primary_onboard_step(callback.message, ctx, prompt_id, keys, feats, next_idx)
-        await state.update_data(ponboard_idx=next_idx)
-
-    @router.callback_query(F.data.startswith("user:ponboard_prev:"))
-    async def primary_onboard_prev(callback: CallbackQuery, state: FSMContext) -> None:
-        if not callback.message:
-            return
-        guarded = await _ponboard_guard(callback, state)
-        if not guarded:
-            return
-        prompt_id, keys, step_idx = guarded
         if step_idx <= 0:
-            await callback.answer("Already at the first variable.", show_alert=True)
-            return
-        prev_idx = step_idx - 1
-        await callback.answer()
-        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
-        if not prompt:
-            await callback.message.answer("Prompt not found.")
             await state.clear()
+            await callback.answer()
+            await callback.message.edit_text(
+                "Variable setup cancelled. Open «My postcards» to continue editing your draft.",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [InlineKeyboardButton(text="👤 My postcards", callback_data="menu:my_prompts:0")]
+                    ]
+                ),
+            )
             return
+
+        prev_idx = step_idx - 1
+        await state.update_data(ponboard_idx=prev_idx)
         feach = ensure_dict(prompt.get("feach_data") or {})
         feats = feach.get("features") or {}
         if not isinstance(feats, dict):
             feats = {}
-        await _send_primary_onboard_step(callback.message, ctx, prompt_id, keys, feats, prev_idx)
-        await state.update_data(ponboard_idx=prev_idx)
+        k = keys[prev_idx]
+        feat = feats.get(k) if isinstance(feats.get(k), dict) else {}
+        varname = feat.get("varname", k)
+        about = feat.get("about", "")
+        back_cb = f"user:ponboard_feat_back:{prompt_id}:{prev_idx}"
+        await callback.answer()
+        try:
+            await callback.message.edit_text(
+                f"Variable: {varname}\nAbout: {about}",
+                reply_markup=build_feature_config_menu(
+                    prompt_id, k, feat, back_callback=back_cb
+                ),
+            )
+        except TelegramBadRequest:
+            await _send_primary_onboard_step(
+                callback.message, ctx, prompt_id, keys, feats, prev_idx
+            )
 
     @router.callback_query(F.data == "menu:create_prompt")
     async def create_prompt_callback(callback: CallbackQuery, state: FSMContext) -> None:
