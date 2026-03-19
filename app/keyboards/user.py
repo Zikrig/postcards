@@ -113,13 +113,8 @@ def build_user_prompt_card(
     )
 
     if not is_draft:
-        for feat_key, feat in features.items():
-            label = btn_label(
-                str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
-                18,
-            )
-            rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
-
+        # Variables/feature configuration should not be shown on the card level.
+        # It will be handled inside "Prompt Generation Menu" -> "Variable settings".
         rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
         rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
         pub_label = "🔒 Make Private" if is_public else "🟢 Make Public"

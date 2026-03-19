@@ -153,7 +153,8 @@ def build_prompt_generation_menu(prompt_id: int, is_draft: bool, back_callback: 
     Actual image generation is triggered separately by the prompt card.
     """
     rows: list[list[InlineKeyboardButton]] = []
-    if is_draft:
+    # Variable settings should be available for final templates only.
+    if not is_draft:
         rows.append([InlineKeyboardButton(text="⚙️ Variable settings", callback_data=f"admin:dfm:{prompt_id}")])
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
@@ -300,10 +301,8 @@ def build_admin_prompt_card(
         or (template == "Your prompt template here")
     )
 
-    if not is_draft:
-        for feat_key, feat in features.items():
-            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
-            rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
+    # Variables/feature configuration is handled inside "Prompt Generation Menu" (Variable settings),
+    # so we do not show "🔹 ..." buttons on the card level.
     # Variables & "draft → final template" moved to a submenu
     rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
 
