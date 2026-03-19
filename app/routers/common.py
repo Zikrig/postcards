@@ -509,7 +509,6 @@ class RouterCtx:
             (template == draft_idea)
             or (not template)
             or (template == "Your prompt template here")
-            or ("[" not in template and "<" not in template)
         )
 
         logger.info(

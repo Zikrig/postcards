@@ -78,7 +78,14 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
             (template == draft_idea)
             or (not template)
             or (template == "Your prompt template here")
-            or ("[" not in template and "<" not in template)
+        )
+
+        logging.info(
+            "admin_prompt_generation_menu: prompt_id=%s is_draft=%s template_len=%s draft_idea_len=%s",
+            prompt_id,
+            is_draft,
+            len(template),
+            len(str(draft_idea or "")),
         )
 
         back_cb = f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
