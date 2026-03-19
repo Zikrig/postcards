@@ -246,7 +246,14 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
             reference_photo_file_id=prompt["reference_photo_file_id"],
         )
         await state.set_state(AdminStates.waiting_prompt_edit_template)
+        # Telegram имеет ограничение на длину сообщения, поэтому если шаблон очень большой,
+        # покажем только начало.
+        current_template = str(prompt.get("template") or "")
+        max_chars = 3500
+        if len(current_template) > max_chars:
+            current_template = current_template[:max_chars] + "\n... (truncated)"
         await callback.message.answer(
+            f"Current template:\n{current_template}\n\n"
             "Send new template.\n"
             "- Use [var] for image variables\n"
             "- Use <var> for text variables"
