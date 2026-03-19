@@ -154,10 +154,25 @@ def build_prompt_generation_menu(prompt_id: int, is_draft: bool, back_callback: 
     """
     rows: list[list[InlineKeyboardButton]] = []
     if is_draft:
-        rows.append([InlineKeyboardButton(text="⚙️ Variable settings", callback_data=f"admin:dfm:{prompt_id}")])
+        rows.append(
+            [InlineKeyboardButton(text="⚙️ Variable settings", callback_data=f"admin:dfm:{prompt_id}")]
+        )
+        rows.append(
+            [InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="🪄 Generate Prompt from Draft",
+                    callback_data=f"admin:final:{prompt_id}",
+                )
+            ]
+        )
+    else:
+        # Для финального шаблона меню генерации не должно предлагать “черновые” операции с переменными.
+        rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
+        rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
 
-    rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="🪄 Generate Prompt from Draft", callback_data=f"admin:final:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="◀ Back to prompt", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
