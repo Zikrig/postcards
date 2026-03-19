@@ -61,7 +61,7 @@ def build_feature_config_menu(
     ])
     rows.append([InlineKeyboardButton(text="Add option", callback_data=f"admin:featadd:{prompt_id}:{feat_key}")])
     if show_dont_specify:
-        # Disables the feature entirely so it won't be included in generated prompt variables.
+        # Draft setup: remove variable from feach and exit to the generation menu / next step.
         rows.append(
             [
                 InlineKeyboardButton(

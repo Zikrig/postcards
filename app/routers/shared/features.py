@@ -19,7 +19,13 @@ from app.keyboards.common import (
     build_final_wizard_step_keyboard,
 )
 from app.states import AdminStates, FinalPromptSetupStates, PrimaryPromptOnboardingStates
-from app.utils import ensure_dict, get_feach_option_enabled, get_feach_option_text, variable_token
+from app.utils import (
+    ensure_dict,
+    get_feach_option_enabled,
+    get_feach_option_text,
+    prompt_record_is_draft,
+    variable_token,
+)
 from app.routers.common import RouterCtx
 
 
@@ -70,20 +76,6 @@ async def is_primary_onboard_feature_step(
     if pid != prompt_id or idx < 0 or idx >= len(keys):
         return False
     return keys[idx] == feat_key
-
-
-def _prompt_is_draft(prompt: Any) -> bool:
-    """
-    Detect draft purely from DB fields.
-    We cannot rely on FSM state because `admin:feach:*` callbacks are handled with `state.get_state()==None`.
-    """
-    feach_data_raw = {}
-    if prompt is not None and hasattr(prompt, "get"):
-        feach_data_raw = prompt.get("feach_data") or {}
-    feach_data = ensure_dict(feach_data_raw)
-    draft_idea = str(feach_data.get("idea") or "")
-    template = str(prompt.get("template") or "") if prompt is not None and hasattr(prompt, "get") else ""
-    return (template == draft_idea) or (not template) or (template == "Your prompt template here")
 
 
 def register_shared_features(router: Router, ctx: RouterCtx) -> None:
@@ -172,7 +164,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         # UX: show a short post with a single action button.
         # The actual prompt card (with full controls) opens on demand.
         await message.answer(
-            "Пост готов. Нажми TEST MY PROMPT, чтобы открыть карточку с настройками и генерацией.",
+            "The Prompt is ready! Let's test it!",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
                     [
@@ -228,7 +220,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
         back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-        show_dont = _prompt_is_draft(prompt)
+        show_dont = prompt_record_is_draft(prompt)
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
@@ -317,7 +309,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            show_dont = _prompt_is_draft(prompt)
+            show_dont = prompt_record_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -335,8 +327,8 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
     @router.callback_query(F.data.startswith("admin:nospec:"))
     async def admin_nospec_feature(callback: CallbackQuery, state: FSMContext) -> None:
         """
-        Draft UX helper: "Dont specify" disables this feature entirely
-        so it won't be included as a prompt variable during final template generation.
+        Remove this variable from feach.features and leave the editor:
+        next variable onboarding step, or Prompt Generation Menu.
         """
         if not callback.message:
             return
@@ -365,46 +357,74 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
 
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
+        if not isinstance(features, dict):
+            features = {}
         if feat_key not in features:
             await callback.answer("Feature not found", show_alert=True)
             return
 
-        feat = features.get(feat_key)
-        if not isinstance(feat, dict):
-            feat = {}
-
-        # Disable feature entirely: no preset options, no custom, no my_own.
-        feat["my_own"] = False
-        opts = feat.get("options") or {}
-        if isinstance(opts, dict):
-            for _k, opt_v in opts.items():
-                if isinstance(opt_v, dict):
-                    opt_v["enabled"] = False
-        feat["options"] = opts
-        feat["custom"] = []
-        features[feat_key] = feat
+        del features[feat_key]
         feach_data["features"] = features
-
         await ctx.repo.update_prompt_feach_data(prompt_id, feach_data)
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
-        if prompt:
-            feach_data = ensure_dict(prompt.get("feach_data") or {})
-            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            show_dont = _prompt_is_draft(prompt)
+        if not prompt:
+            await callback.answer()
+            return
+
+        cur = await state.get_state()
+        data = await state.get_data()
+        if (
+            cur == PrimaryPromptOnboardingStates.reviewing_variables
+            and int(data.get("ponboard_prompt_id") or -1) == prompt_id
+        ):
+            fe = ensure_dict(prompt.get("feach_data") or {}).get("features") or {}
+            if not isinstance(fe, dict):
+                fe = {}
+            new_keys = list(fe.keys())
             try:
-                await callback.message.edit_reply_markup(
+                old_idx = int(data.get("ponboard_idx", 0))
+            except (TypeError, ValueError):
+                old_idx = 0
+            if not new_keys:
+                await state.clear()
+                await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
+                await callback.answer("Variable removed")
+                return
+            new_idx = min(old_idx, len(new_keys) - 1)
+            await state.update_data(ponboard_keys=new_keys, ponboard_idx=new_idx)
+            k = new_keys[new_idx]
+            nf = fe.get(k) if isinstance(fe.get(k), dict) else {}
+            varname = nf.get("varname", k)
+            about = nf.get("about", "")
+            back_cb = f"user:ponboard_feat_back:{prompt_id}:{new_idx}"
+            show_dont = prompt_record_is_draft(prompt)
+            try:
+                await callback.message.edit_text(
+                    f"Variable: {varname}\nAbout: {about}",
                     reply_markup=build_feature_config_menu(
                         prompt_id,
-                        feat_key,
-                        feach_data.get("features", {}).get(feat_key, {}),
+                        k,
+                        nf,
                         back_callback=back_cb,
                         show_dont_specify=show_dont,
-                    )
+                    ),
                 )
             except TelegramBadRequest:
-                pass
+                await callback.message.answer(
+                    f"Variable: {varname}\nAbout: {about}",
+                    reply_markup=build_feature_config_menu(
+                        prompt_id,
+                        k,
+                        nf,
+                        back_callback=back_cb,
+                        show_dont_specify=show_dont,
+                    ),
+                )
+            await callback.answer("Variable removed")
+            return
 
-        await callback.answer("Variable disabled")
+        await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
+        await callback.answer("Variable removed")
 
     @router.callback_query(F.data.startswith("admin:featdel:"))
     async def admin_feature_delete(callback: CallbackQuery) -> None:
@@ -501,7 +521,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
-            show_dont = _prompt_is_draft(prompt)
+            show_dont = prompt_record_is_draft(prompt)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
@@ -610,7 +630,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     str(feat_key),
                     feach_data.get("features", {}).get(feat_key, {}),
                     back_callback=back_cb,
-                    show_dont_specify=_prompt_is_draft(prompt),
+                    show_dont_specify=prompt_record_is_draft(prompt),
                 ),
             )
 
@@ -655,7 +675,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                 await state.clear()
                 await callback.answer("Prompt not found", show_alert=True)
                 return
-            show_dont = _prompt_is_draft(prompt)
+            show_dont = prompt_record_is_draft(prompt)
             feach_data = ensure_dict(prompt.get("feach_data") or {})
             feats = feach_data.get("features") or {}
             if not isinstance(feats, dict):

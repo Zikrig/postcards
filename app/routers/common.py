@@ -69,7 +69,7 @@ from app.keyboards.admin import (
 )
 from app.repo import Repo
 from app.states import AdminStates
-from app.utils import ensure_dict, render_prompt, variable_token
+from app.utils import ensure_dict, prompt_record_is_draft, render_prompt, variable_token
 
 logger = logging.getLogger(__name__)
 
@@ -133,17 +133,21 @@ class RouterCtx:
     async def format_prompt_description(self, prompt: asyncpg.Record) -> str:
         """Returns a formatted description string for a prompt, including the author if available."""
         title = prompt.get("title") or "Untitled"
-        description = (prompt.get("description") or title).strip()
+        description = (prompt.get("description") or "").strip()
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         idea = feach_data.get("idea", "")
-        
+
         text = f"Prompt: {title}"
-        if idea:
-            text += f"\n\nIdea: {idea}"
-        
-        # Add description if different from title and idea
-        if description and description != title and description != idea:
-            text += f"\n\nDescription: {description}"
+        if prompt_record_is_draft(prompt):
+            # Draft card: show stored idea from AI pass; optional DB description if distinct.
+            if idea:
+                text += f"\n\nIdea: {idea}"
+            if description and description != (title or "").strip() and description != str(idea or "").strip():
+                text += f"\n\nDescription: {description}"
+        else:
+            # Final prompt: show description only (not the internal feach idea).
+            if description:
+                text += f"\n\n{description}"
             
         owner_tg_id = prompt.get("owner_tg_id")
         if owner_tg_id:

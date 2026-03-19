@@ -170,3 +170,17 @@ def ensure_unique_option_key(base_key: str, existing: set[str], max_length: int 
         if candidate not in existing:
             return candidate
     return base_key[:max_length] + "_0"
+
+
+def prompt_record_is_draft(prompt: Any) -> bool:
+    """
+    True while the prompt has not received a final template yet (DB fields only).
+    Same notion as template ≈ feach idea / empty / placeholder.
+    """
+    feach_data_raw = {}
+    if prompt is not None and hasattr(prompt, "get"):
+        feach_data_raw = prompt.get("feach_data") or {}
+    feach_data = ensure_dict(feach_data_raw)
+    draft_idea = str(feach_data.get("idea") or "")
+    template = str(prompt.get("template") or "") if prompt is not None and hasattr(prompt, "get") else ""
+    return (template == draft_idea) or (not template) or (template == "Your prompt template here")
