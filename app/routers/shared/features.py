@@ -228,6 +228,15 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             cur_state == PrimaryPromptOnboardingStates.reviewing_variables
             or (ponboard_prompt_id_int == prompt_id)
         )
+        logging.info(
+            "dont_specify debug: prompt_id=%s feat_key=%s cur_state=%r ponboard_prompt_id=%r ponboard_prompt_id_int=%r show_dont=%s",
+            prompt_id,
+            feat_key,
+            cur_state,
+            ponboard_prompt_id,
+            ponboard_prompt_id_int,
+            show_dont,
+        )
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
