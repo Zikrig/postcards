@@ -67,9 +67,24 @@ def build_prompt_preview_menu(
     show_test: bool = False,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = [
-        [InlineKeyboardButton(text="🚀 Generate 1K (1 🪙)", callback_data=f"prompt:generate:1k:{prompt_id}")],
-        [InlineKeyboardButton(text="🚀 Generate 2K (2 🪙)", callback_data=f"prompt:generate:2k:{prompt_id}")],
-        [InlineKeyboardButton(text="🚀 Generate 4K (4 🪙)", callback_data=f"prompt:generate:4k:{prompt_id}")],
+        [
+            InlineKeyboardButton(
+                text="🚀 Generate postcard 1K (1 🪙)",
+                callback_data=f"prompt:generate:1k:{prompt_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🚀 Generate postcard 2K (2 🪙)",
+                callback_data=f"prompt:generate:2k:{prompt_id}",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="🚀 Generate postcard 4K (4 🪙)",
+                callback_data=f"prompt:generate:4k:{prompt_id}",
+            )
+        ],
     ]
     if show_test:
         rows.append([InlineKeyboardButton(text="🧪 Test (1 🪙)", callback_data=f"admin:test:{prompt_id}")])
@@ -116,7 +131,7 @@ def build_user_prompt_card(
         rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
+    rows.append([InlineKeyboardButton(text="🚀 Generate postcard", callback_data=f"prompt:select:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
     pub_label = "🔒 Make Private" if is_public else "🟢 Make Public"
     rows.append([InlineKeyboardButton(text=pub_label, callback_data=f"admin:toggle_public:{prompt_id}")])

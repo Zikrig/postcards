@@ -155,16 +155,21 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             await progress_msg.delete()
         except Exception:
             pass
-        await message.answer("Final prompt saved — full controls are unlocked on the card below.")
-        updated = await ctx.repo.get_prompt_by_id(prompt_id)
-        if not updated:
-            return
-        logging.info(
-            "_run_final_deepseek_generate: presenting full prompt card prompt_id=%s viewer=%s",
-            prompt_id,
-            user_tg_id,
+        # UX: show a short post with a single action button.
+        # The actual prompt card (with full controls) opens on demand.
+        await message.answer(
+            "Пост готов. Нажми TEST MY PROMPT, чтобы открыть карточку с настройками и генерацией.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="TEST MY PROMPT",
+                            callback_data=f"prompt:test_my_prompt:{prompt_id}",
+                        )
+                    ]
+                ]
+            ),
         )
-        await ctx.present_prompt_card(message, updated, user_tg_id)
 
     @router.callback_query(F.data.startswith("admin:feach:"))
     async def admin_feach_feature(callback: CallbackQuery, state: FSMContext) -> None:

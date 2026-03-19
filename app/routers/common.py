@@ -170,7 +170,10 @@ class RouterCtx:
         if not all_active:
             await message.answer("No prompts yet. Please wait for admin to add them.")
             return
-        await message.answer("Select a prompt or Generate:", reply_markup=build_main_menu(main_prompts))
+        await message.answer(
+            "Select a prompt or Generate postcard:",
+            reply_markup=build_main_menu(main_prompts),
+        )
 
     async def show_tags_menu(self, message: Message, page: int = 0) -> None:
         tags, total = await self.repo.list_tags_paginated(page=page, per_page=self.repo.PAGE_SIZE)
@@ -197,7 +200,10 @@ class RouterCtx:
     async def edit_to_main_menu(self, message: Message) -> None:
         main_prompts = await self.repo.list_prompts_main_menu(active_only=True)
         try:
-            await message.edit_text("Select a prompt or Generate:", reply_markup=build_main_menu(main_prompts))
+            await message.edit_text(
+                "Select a prompt or Generate postcard:",
+                reply_markup=build_main_menu(main_prompts),
+            )
         except TelegramBadRequest:
             await self.show_prompt_buttons(message)
 
@@ -813,7 +819,7 @@ class RouterCtx:
         prompt_title = data["prompt_title"]
         final_prompt = render_prompt(template, answers)
         progress_message = await message.answer(
-            f"Generating image ({generation_quality}) for prompt: {prompt_title}\nStatus: queued"
+            f"Generating postcard ({generation_quality}) for prompt: {prompt_title}\nStatus: queued"
         )
         last_progress_text = progress_message.text or ""
         try:
@@ -824,7 +830,7 @@ class RouterCtx:
                 status_text = str(status or "processing")
                 progress_text = "?" if progress is None else str(progress)
                 text = (
-                    f"Generating image for prompt: {prompt_title}\n"
+                    f"Generating postcard for prompt: {prompt_title}\n"
                     f"Status: {status_text}\n"
                     f"Progress: {progress_text}%"
                 )

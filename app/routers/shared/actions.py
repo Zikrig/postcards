@@ -26,6 +26,35 @@ def _swap_test_button_label(markup: InlineKeyboardMarkup, prompt_id: int, label:
 
 
 def register_shared_actions(router: Router, ctx: RouterCtx) -> None:
+    @router.callback_query(F.data.startswith("prompt:test_my_prompt:"))
+    async def prompt_test_my_prompt(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+
+        user = await ctx.repo.get_user(callback.from_user.id)
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+
+        await callback.answer()
+        # Open card with Back returning to the prompt generation menu.
+        await ctx.present_prompt_card(
+            callback.message,
+            prompt,
+            callback.from_user.id,
+            back_callback=f"admin:genmenu:{prompt_id}",
+        )
 
     @router.callback_query(F.data.startswith("admin:test:"))
     async def admin_test_prompt(callback: CallbackQuery, state: FSMContext) -> None:

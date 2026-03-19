@@ -342,7 +342,9 @@ def build_admin_prompt_card(
     rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
 
     if not is_draft:
-        rows.append([InlineKeyboardButton(text="🚀 Generate", callback_data=f"prompt:select:{prompt_id}")])
+        rows.append(
+            [InlineKeyboardButton(text="🚀 Generate postcard", callback_data=f"prompt:select:{prompt_id}")]
+        )
         rows.append([InlineKeyboardButton(text="Tags", callback_data=f"admin:editpart:tags:{prompt_id}")])
         rows.append(
             [InlineKeyboardButton(
@@ -374,7 +376,9 @@ def build_admin_community_card(
     )
 
     if not is_draft:
-        rows.append([InlineKeyboardButton(text="🚀 Generate (Free)", callback_data=f"prompt:select:{prompt_id}")])
+        rows.append(
+            [InlineKeyboardButton(text="🚀 Generate postcard (Free)", callback_data=f"prompt:select:{prompt_id}")]
+        )
 
     rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
