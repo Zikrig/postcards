@@ -1,4 +1,5 @@
 """Shared context and helpers for routers (ensure_user, run_generation, etc.)."""
+import json
 import logging
 import asyncio
 import io
@@ -103,6 +104,30 @@ class RouterCtx:
 
     async def ensure_user(self, message: Message) -> asyncpg.Record:
         return await self.ensure_user_from_tg(message.from_user)
+
+    def editable_prompt_description_preview(self, prompt: asyncpg.Record) -> str:
+        """
+        Text shown when editing the prompt description: DB column + fallback to feach idea/title
+        so it matches what users see on the card when the description column is empty or = title.
+        """
+        db_desc = (prompt.get("description") or "").strip()
+        title = (prompt.get("title") or "").strip()
+        idea = (ensure_dict(prompt.get("feach_data") or {}).get("idea") or "").strip()
+        if db_desc and db_desc != title:
+            return db_desc
+        if idea:
+            return idea
+        return db_desc or title or ""
+
+    def normalize_example_file_ids(self, raw: Any) -> list[str]:
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw) if raw else []
+            except json.JSONDecodeError:
+                raw = []
+        if not isinstance(raw, list):
+            return []
+        return [str(f) for f in raw[:3] if f]
 
     async def format_prompt_description(self, prompt: asyncpg.Record) -> str:
         """Returns a formatted description string for a prompt, including the author if available."""
@@ -426,13 +451,46 @@ class RouterCtx:
         viewer_tg_id: int,
         back_callback: Optional[str] = None,
     ) -> None:
-        """Display a prompt card with the correct keyboard for the viewer."""
+        """Display a prompt card with the correct keyboard (in-place edit when possible)."""
         text = await self.format_prompt_description(prompt)
         markup = self.build_prompt_card_markup(prompt, viewer_tg_id, back_callback)
         try:
             await message.edit_text(text, reply_markup=markup)
         except TelegramBadRequest:
             await message.answer(text, reply_markup=markup)
+
+    async def present_prompt_card(
+        self,
+        message: Message,
+        prompt: asyncpg.Record,
+        viewer_tg_id: int,
+        back_callback: Optional[str] = None,
+    ) -> None:
+        """
+        Show prompt card text + keyboard; attach example and/or reference photos like other entry points.
+        """
+        text = await self.format_prompt_description(prompt)
+        markup = self.build_prompt_card_markup(prompt, viewer_tg_id, back_callback)
+        example_ids = self.normalize_example_file_ids(prompt.get("example_file_ids"))
+        ref_id = prompt.get("reference_photo_file_id")
+
+        async def send_reference_followup() -> None:
+            if not ref_id:
+                return
+            try:
+                await message.answer_photo(photo=ref_id, caption="📎 Reference image")
+            except TelegramBadRequest:
+                pass
+
+        if example_ids:
+            await message.answer_photo(photo=example_ids[0], caption=text, reply_markup=markup)
+            await send_reference_followup()
+        else:
+            try:
+                await message.edit_text(text, reply_markup=markup)
+            except TelegramBadRequest:
+                await message.answer(text, reply_markup=markup)
+            await send_reference_followup()
 
     async def show_prompt_edit_actions(self, message: Message, prompt: asyncpg.Record, is_admin_view: bool | None = None) -> None:
         """
@@ -443,17 +501,15 @@ class RouterCtx:
           - None  → autodetect по prompt.owner_tg_id и user.is_admin (вызывающий код может пробросить явно)
         """
         ref_id = prompt.get("reference_photo_file_id")
-        examples = prompt.get("example_file_ids")
+        example_ids = self.normalize_example_file_ids(prompt.get("example_file_ids"))
         logger.info(
             "show_prompt_edit_actions: prompt_id=%s title=%r ref_id=%r examples=%r is_admin_view=%r",
             prompt.get("id"),
             prompt.get("title"),
             ref_id,
-            examples,
+            example_ids,
             is_admin_view,
         )
-        has_ref_or_example = bool(ref_id) or bool(examples)
-        reference_text = "set" if has_ref_or_example else "not set"
         # Определяем, куда должен вести Back:
         # - если явно передали is_admin_view, используем его
         # - иначе: owner_tg_id есть → юзерский флоу (My prompts), иначе админский
@@ -463,7 +519,6 @@ class RouterCtx:
         await message.answer(
             "Prompt edit menu:\n"
             f"Title: {prompt['title']}\n"
-            f"Reference image: {reference_text}\n"
             "Choose what to change:",
             reply_markup=build_prompt_edit_menu(int(prompt["id"]), back_callback=back_cb),
         )

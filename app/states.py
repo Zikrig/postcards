@@ -39,3 +39,8 @@ class AdminStates(StatesGroup):
 
 class GenerateStates(StatesGroup):
     waiting_variable = State()
+
+
+class FinalPromptSetupStates(StatesGroup):
+    """Step-by-step variable choices before DeepSeek «generate final template»."""
+    choosing = State()

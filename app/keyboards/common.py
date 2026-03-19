@@ -62,3 +62,75 @@ def build_feature_config_menu(
     back_cb = back_callback or f"menu:my_prompt_item:{prompt_id}"
     rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_final_wizard_step_keyboard(
+    prompt_id: int,
+    step_index: int,
+    option_texts: list[str],
+    mode: str = "pick",
+) -> InlineKeyboardMarkup:
+    """
+    mode: 'pick' — one button per option + Don't specify + Cancel.
+          'freeform' — Include (AI) / Don't specify + Cancel.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    if mode == "freeform":
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Include (AI picks wording)",
+                    callback_data=f"admin:fpc:{prompt_id}:{step_index}:ff",
+                )
+            ]
+        )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Don't specify",
+                    callback_data=f"admin:fpc:{prompt_id}:{step_index}:sk",
+                )
+            ]
+        )
+    else:
+        for i, txt in enumerate(option_texts):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=btn_label(txt, 36),
+                        callback_data=f"admin:fpc:{prompt_id}:{step_index}:o{i}",
+                    )
+                ]
+            )
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="Don't specify",
+                    callback_data=f"admin:fpc:{prompt_id}:{step_index}:sk",
+                )
+            ]
+        )
+    rows.append(
+        [InlineKeyboardButton(text="◀ Cancel", callback_data=f"admin:fpcan:{prompt_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def build_draft_variable_settings_menu(
+    prompt_id: int,
+    feach_data: dict[str, Any],
+    back_callback: str,
+) -> InlineKeyboardMarkup:
+    """Advanced: open per-variable feach config from draft (🔹 list)."""
+    features = feach_data.get("features") or {}
+    rows: list[list[InlineKeyboardButton]] = []
+    for feat_key, feat in features.items():
+        label = btn_label(
+            str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key),
+            18,
+        )
+        rows.append(
+            [InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")]
+        )
+    rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

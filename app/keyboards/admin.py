@@ -130,11 +130,20 @@ def build_prompt_edit_menu(prompt_id: int, back_callback: str = "admin:pw:list")
             [InlineKeyboardButton(text="📝 Description", callback_data=f"admin:editpart:description:{prompt_id}")],
             [InlineKeyboardButton(text="Change title", callback_data=f"admin:editpart:title:{prompt_id}")],
             [InlineKeyboardButton(text="Change template", callback_data=f"admin:editpart:template:{prompt_id}")],
+            [InlineKeyboardButton(text="🖼 Images & examples", callback_data=f"admin:editpart:images:{prompt_id}")],
+            [InlineKeyboardButton(text="📥 Import JSON", callback_data=f"admin:editpart:import_json:{prompt_id}")],
+            [InlineKeyboardButton(text="Back to list", callback_data=back_callback)],
+        ]
+    )
+
+
+def build_prompt_edit_images_menu(prompt_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [InlineKeyboardButton(text="Replace ref. image", callback_data=f"admin:editpart:ref:set:{prompt_id}")],
             [InlineKeyboardButton(text="Remove ref. image", callback_data=f"admin:editpart:ref:clear:{prompt_id}")],
             [InlineKeyboardButton(text="Examples (1–3)", callback_data=f"admin:editpart:examples:{prompt_id}")],
-            [InlineKeyboardButton(text="Test", callback_data=f"admin:test:{prompt_id}")],
-            [InlineKeyboardButton(text="Back to list", callback_data=back_callback)],
+            [InlineKeyboardButton(text="◀ Back to edit", callback_data=f"admin:edit:{prompt_id}")],
         ]
     )
 
@@ -267,9 +276,19 @@ def build_admin_prompt_card(
         or ("[" not in template and "<" not in template)
     )
 
-    for feat_key, feat in features.items():
-        label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
-        rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
+    if is_draft:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="⚙️ Variable settings",
+                    callback_data=f"admin:dfm:{prompt_id}",
+                )
+            ]
+        )
+    else:
+        for feat_key, feat in features.items():
+            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+            rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}")])

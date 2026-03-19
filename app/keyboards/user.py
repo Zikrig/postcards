@@ -108,9 +108,19 @@ def build_user_prompt_card(
         or ("[" not in template and "<" not in template)
     )
 
-    for feat_key, feat in features.items():
-        label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
-        rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
+    if is_draft:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text="⚙️ Variable settings",
+                    callback_data=f"admin:dfm:{prompt_id}",
+                )
+            ]
+        )
+    else:
+        for feat_key, feat in features.items():
+            label = btn_label(str((feat.get("varname") or feat_key) if isinstance(feat, dict) else feat_key), 18)
+            rows.append([InlineKeyboardButton(text=f"🔹 {label}", callback_data=f"admin:feach:{prompt_id}:{feat_key}")])
 
     rows.append([InlineKeyboardButton(text="➕ Add variable", callback_data=f"admin:editvar:add:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="🪄 Generate final template", callback_data=f"admin:final:{prompt_id}")])

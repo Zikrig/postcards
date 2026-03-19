@@ -208,6 +208,7 @@ def register_admin_prompts(router: Router, ctx: RouterCtx) -> None:
         if not user or not user["is_admin"]:
             await callback.answer("Admin only", show_alert=True)
             return
+        await state.update_data(import_target_prompt_id=None)
         await state.set_state(AdminStates.waiting_import_json)
         await callback.message.answer("Send a JSON file (exported prompt) to import. It will create or update a prompt by title.")
         await callback.answer()
@@ -252,12 +253,70 @@ def register_admin_prompts(router: Router, ctx: RouterCtx) -> None:
             ref_id = None
             feach_data = None
             example_ids = []
+
+        data = await state.get_data()
+        import_target_id = data.get("import_target_prompt_id")
+        if import_target_id is not None:
+            try:
+                import_target_id = int(import_target_id)
+            except (TypeError, ValueError):
+                import_target_id = None
+
+        if import_target_id is not None:
+            target = await ctx.repo.get_prompt_by_id(import_target_id)
+            if not target:
+                await message.answer("Target prompt not found.")
+                await state.clear()
+                return
+            is_admin = bool(user.get("is_admin"))
+            is_owner = target.get("owner_tg_id") == message.from_user.id
+            if not (is_admin or is_owner):
+                await message.answer("No permission to update this prompt.")
+                await state.clear()
+                return
+            keep_ref = target.get("reference_photo_file_id")
+            try:
+                await ctx.repo.update_prompt(import_target_id, title, template, var_descriptions, keep_ref)
+                desc_from_file = (payload.get("description") or "").strip()
+                idea_from_file = (payload.get("idea") or "").strip()
+                if desc_from_file:
+                    await ctx.repo.update_prompt_description(import_target_id, desc_from_file)
+                elif idea_from_file:
+                    await ctx.repo.update_prompt_description(import_target_id, idea_from_file)
+                feach_existing = ensure_dict(target.get("feach_data") or {})
+                if idea_from_file:
+                    feach_existing["idea"] = idea_from_file
+                    await ctx.repo.update_prompt_feach_data(import_target_id, feach_existing)
+                await message.answer(f"Prompt «{title}» updated from JSON (id={import_target_id}).")
+                refreshed = await ctx.repo.get_prompt_by_id(import_target_id)
+                if refreshed:
+                    await ctx.show_prompt_edit_actions(message, refreshed, is_admin_view=not is_owner)
+            except Exception as e:
+                await message.answer(f"Error: {e}")
+            await state.clear()
+            return
+
+        if not user.get("is_admin"):
+            await message.answer("Only admins can import without choosing a prompt in Edit → Import JSON.")
+            await state.clear()
+            return
+
         existing = await ctx.repo.get_prompt_by_title(title)
         try:
             if existing:
                 # Keep existing reference when updating (import does not touch ref/feach/examples)
                 keep_ref = existing.get("reference_photo_file_id") if ref_id is None else ref_id
                 await ctx.repo.update_prompt(existing["id"], title, template, var_descriptions, keep_ref)
+                desc_from_file = (payload.get("description") or "").strip()
+                idea_from_file = (payload.get("idea") or "").strip()
+                if desc_from_file:
+                    await ctx.repo.update_prompt_description(existing["id"], desc_from_file)
+                elif idea_from_file:
+                    await ctx.repo.update_prompt_description(existing["id"], idea_from_file)
+                feach_existing = ensure_dict(existing.get("feach_data") or {})
+                if idea_from_file:
+                    feach_existing["idea"] = idea_from_file
+                    await ctx.repo.update_prompt_feach_data(existing["id"], feach_existing)
                 await message.answer(f"Prompt «{title}» updated.")
             else:
                 await ctx.repo.insert_prompt(
@@ -267,6 +326,12 @@ def register_admin_prompts(router: Router, ctx: RouterCtx) -> None:
                 new_prompt = await ctx.repo.get_prompt_by_title(title)
                 if new_prompt:
                     await ctx.repo.set_prompt_examples(new_prompt["id"], example_ids)
+                    desc_from_file = (payload.get("description") or "").strip()
+                    idea_from_file = (payload.get("idea") or "").strip()
+                    if desc_from_file:
+                        await ctx.repo.update_prompt_description(new_prompt["id"], desc_from_file)
+                    elif idea_from_file:
+                        await ctx.repo.update_prompt_description(new_prompt["id"], idea_from_file)
                 await message.answer(f"Prompt «{title}» created.")
         except Exception as e:
             await message.answer(f"Error: {e}")

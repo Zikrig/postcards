@@ -2,7 +2,6 @@ import logging
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
-from app.utils import ensure_dict
 from app.routers.common import RouterCtx
 
 
@@ -29,14 +28,12 @@ def register_shared_prompt_card(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("No permission", show_alert=True)
             return
 
-        text = await ctx.format_prompt_description(prompt)
-
-        markup = ctx.build_prompt_card_markup(prompt, callback.from_user.id, back_callback="admin:pw:list")
-
-        try:
-            await callback.message.edit_text(text, reply_markup=markup)
-        except TelegramBadRequest:
-            await callback.message.answer(text, reply_markup=markup)
+        await ctx.present_prompt_card(
+            callback.message,
+            prompt,
+            callback.from_user.id,
+            back_callback="admin:pw:list",
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:active:"))

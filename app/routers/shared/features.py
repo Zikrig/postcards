@@ -1,11 +1,24 @@
 import logging
 from typing import Any
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
-from app.keyboards.common import build_feature_config_menu
-from app.states import AdminStates
+
+from app.final_prompt_wizard import (
+    FREE_FORM_INCLUDE,
+    build_final_setup_steps,
+    build_variables_spec_from_wizard_choices,
+    build_variables_spec_legacy_no_wizard,
+)
+from app.keyboards.common import (
+    build_draft_variable_settings_menu,
+    build_feature_config_menu,
+    build_final_wizard_step_keyboard,
+)
+from app.states import AdminStates, FinalPromptSetupStates
 from app.utils import ensure_dict, get_feach_option_enabled, get_feach_option_text, variable_token
 from app.routers.common import RouterCtx
 
@@ -189,12 +202,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         if not prompt:
             await callback.answer()
             return
-        text = await ctx.format_prompt_description(prompt)
-        markup = ctx.build_prompt_card_markup(prompt, callback.from_user.id)
-        try:
-            await callback.message.edit_text(text, reply_markup=markup)
-        except TelegramBadRequest:
-            await callback.message.answer(text, reply_markup=markup)
+        await ctx.present_prompt_card(callback.message, prompt, callback.from_user.id)
         await callback.answer("Feature deleted")
 
     @router.callback_query(F.data.startswith("admin:myown:"))
@@ -340,17 +348,7 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         user = await ctx.repo.get_user(callback.from_user.id)
         is_admin = bool(user and user.get("is_admin"))
         is_owner = prompt.get("owner_tg_id") == callback.from_user.id
-        markup = ctx.build_prompt_card_markup(prompt, callback.from_user.id)
-        try:
-            await callback.message.edit_text(
-                "Done. Back to prompt.",
-                reply_markup=markup,
-            )
-        except TelegramBadRequest:
-            await callback.message.answer(
-                "Done. Back to prompt.",
-                reply_markup=markup,
-            )
+        await ctx.present_prompt_card(callback.message, prompt, callback.from_user.id)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:optview:"))
@@ -388,8 +386,180 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             text = get_feach_option_text(opt_val)
         await callback.answer(text[:200] if text else "—", show_alert=True)
 
+    @router.callback_query(F.data.startswith("admin:dfm:"))
+    async def admin_draft_var_settings_menu(callback: CallbackQuery) -> None:
+        """Advanced: list 🔹 variables (draft card no longer shows them all at once)."""
+        if not callback.message:
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 3:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+        feach_data = ensure_dict(prompt.get("feach_data") or {})
+        features = feach_data.get("features") or {}
+        if not features:
+            await callback.answer("No variables yet.", show_alert=True)
+            return
+        await callback.answer()
+        kb = build_draft_variable_settings_menu(
+            prompt_id,
+            feach_data,
+            back_callback=f"admin:dfb:{prompt_id}",
+        )
+        await callback.message.answer("Variable settings (advanced):", reply_markup=kb)
+
+    @router.callback_query(F.data.startswith("admin:dfb:"))
+    async def admin_draft_var_settings_back(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+        await callback.answer()
+        await _reopen_prompt_card_message(callback.message, prompt_id, callback.from_user.id)
+
+    @router.callback_query(F.data.startswith("admin:fpcan:"))
+    async def admin_final_wizard_cancel(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        data = await state.get_data()
+        if data.get("final_wizard_prompt_id") != prompt_id:
+            await callback.answer("Nothing to cancel.", show_alert=True)
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await state.clear()
+            await callback.answer()
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("Not allowed", show_alert=True)
+            return
+        await state.clear()
+        await callback.answer("Cancelled")
+        await _reopen_prompt_card_message(callback.message, prompt_id, callback.from_user.id)
+
+    @router.callback_query(
+        StateFilter(FinalPromptSetupStates.choosing),
+        F.data.startswith("admin:fpc:"),
+    )
+    async def admin_final_wizard_pick(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        parts = (callback.data or "").split(":")
+        if len(parts) < 5:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        try:
+            prompt_id = int(parts[2])
+            step_idx = int(parts[3])
+        except ValueError:
+            await callback.answer("Invalid", show_alert=True)
+            return
+        choice_raw = parts[4]
+        data = await state.get_data()
+        if data.get("final_wizard_prompt_id") != prompt_id:
+            await callback.answer("Session expired.", show_alert=True)
+            return
+        if data.get("final_wizard_idx") != step_idx:
+            await callback.answer("Stale step.", show_alert=True)
+            return
+        keys: list[str] = data["final_wizard_keys"]
+        meta: list[dict[str, Any]] = data["final_wizard_meta"]
+        feat_key = keys[step_idx]
+        m = meta[step_idx]
+        opts: list[str] = m["enabled_opts"]
+        mode = m["mode"]
+
+        user = await ctx.repo.get_user(callback.from_user.id)
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await state.clear()
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user and user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await state.clear()
+            await callback.answer("Not allowed", show_alert=True)
+            return
+
+        choices = dict(data.get("final_wizard_choices") or {})
+        if choice_raw == "sk":
+            choices[feat_key] = None
+        elif choice_raw == "ff":
+            if mode != "freeform":
+                await callback.answer("Invalid action", show_alert=True)
+                return
+            choices[feat_key] = FREE_FORM_INCLUDE
+        elif choice_raw.startswith("o") and choice_raw[1:].isdigit():
+            opt_i = int(choice_raw[1:])
+            if mode != "pick" or opt_i < 0 or opt_i >= len(opts):
+                await callback.answer("Invalid option", show_alert=True)
+                return
+            choices[feat_key] = opts[opt_i]
+        else:
+            await callback.answer("Invalid", show_alert=True)
+            return
+
+        next_idx = step_idx + 1
+        await callback.answer("Saved")
+
+        if next_idx >= len(keys):
+            feach_data = ensure_dict(prompt.get("feach_data") or {})
+            features = feach_data.get("features") or {}
+            idea = feach_data.get("idea", "")
+            steps_full = [{"feat_key": k, "feat": features.get(k) or {}} for k in keys]
+            variables_spec = build_variables_spec_from_wizard_choices(steps_full, choices)
+            await state.clear()
+            await _run_final_deepseek_generate(
+                callback.message,
+                prompt_id,
+                idea,
+                variables_spec,
+                callback.from_user.id,
+            )
+            return
+
+        await state.update_data(final_wizard_idx=next_idx, final_wizard_choices=choices)
+        await _send_final_wizard_step(callback.message, state)
+
     @router.callback_query(F.data.startswith("admin:final:"))
-    async def admin_final_prompt(callback: CallbackQuery) -> None:
+    async def admin_final_prompt(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
             return
         user = await ctx.repo.get_user(callback.from_user.id)
@@ -429,80 +599,23 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
         idea = feach_data.get("idea", "")
-        variables_spec: list[dict[str, Any]] = [
-            {
-                "name": "USER_PHOTO",
-                "type": "image",
-                "constant": None,
-                "options": None,
-                "allow_custom": False,
-                "about": "Reference photo of the person to integrate into the scene",
-            },
-        ]
-        for feat_key, feat in features.items():
-            varname = (feat.get("varname") or feat_key).upper().replace(" ", "_")
-            opts = feat.get("options") or {}
-            custom = feat.get("custom") or []
-            enabled_opts = []
-            for opt_k, opt_v in opts.items():
-                if get_feach_option_enabled(opt_v):
-                    enabled_opts.append(get_feach_option_text(opt_v))
-            for c in custom:
-                if isinstance(c, dict) and c.get("enabled", True):
-                    enabled_opts.append(c.get("text", ""))
-                elif isinstance(c, str):
-                    enabled_opts.append(c)
-            my_own = feat.get("my_own", True)
-            if not enabled_opts and not my_own and not custom:
-                continue
-            if len(enabled_opts) == 1 and not my_own and not custom:
-                variables_spec.append(
-                    {
-                        "name": varname,
-                        "type": "text",
-                        "constant": enabled_opts[0],
-                        "options": None,
-                        "allow_custom": False,
-                        "about": feat.get("about", ""),
-                    }
-                )
-            else:
-                variables_spec.append(
-                    {
-                        "name": varname,
-                        "type": "text",
-                        "constant": None,
-                        "options": enabled_opts,
-                        "allow_custom": my_own,
-                        "about": feat.get("about", ""),
-                    }
-                )
-        try:
-            await callback.message.answer("Generating final prompt…")
-            result = await ctx.deepseek.generate_final_prompt(idea, variables_spec)
-        except Exception as e:
-            await callback.message.answer(f"DeepSeek error: {e}")
-            await callback.answer()
-            return
-        template = result.get("template", "")
-        var_descriptions = ensure_dict(result.get("variable_descriptions") or {})
-        if "[USER_PHOTO]" in template:
-            var_descriptions["[USER_PHOTO]"] = {
-                "description": "Reference photo of the person",
-                "options": [],
-                "allow_custom": True,
-                "type": "image",
-            }
-        await ctx.repo.update_prompt(prompt_id, prompt["title"], template, var_descriptions, prompt.get("reference_photo_file_id"))
-        desc = (result.get("description") or "").strip()
-        if desc:
-            await ctx.repo.update_prompt_description(prompt_id, desc)
-        await callback.message.answer("Final prompt saved. You can activate it or edit further.")
-        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
-        if prompt:
-            template = str(prompt.get("template") or "")
-            markup = ctx.build_prompt_card_markup(prompt, callback.from_user.id)
-            await callback.message.answer(
-                f"Template: {template[:300]}…" if len(template) > 300 else f"Template: {template}",
-                reply_markup=markup,
+        steps = build_final_setup_steps(features)
+        if not steps:
+            variables_spec = build_variables_spec_legacy_no_wizard(features)
+            await _run_final_deepseek_generate(
+                callback.message,
+                prompt_id,
+                idea,
+                variables_spec,
+                callback.from_user.id,
             )
+            return
+        await state.set_state(FinalPromptSetupStates.choosing)
+        await state.update_data(
+            final_wizard_prompt_id=prompt_id,
+            final_wizard_keys=[s["feat_key"] for s in steps],
+            final_wizard_meta=[{"mode": s["mode"], "enabled_opts": list(s["enabled_opts"])} for s in steps],
+            final_wizard_idx=0,
+            final_wizard_choices={},
+        )
+        await _send_final_wizard_step(callback.message, state)

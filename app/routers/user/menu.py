@@ -1,5 +1,4 @@
 """User menu handlers: main menu, tags, community browsing."""
-import json
 import logging
 
 from aiogram import F, Router
@@ -7,7 +6,6 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 
-from app.utils import ensure_dict
 from app.routers.common import RouterCtx
 
 logger = logging.getLogger(__name__)
@@ -97,32 +95,12 @@ def register_user_menu(router: Router, ctx: RouterCtx) -> None:
             prompt.get("is_public"),
             prompt.get("owner_tg_id"),
         )
-        feach_data = ensure_dict(prompt.get("feach_data") or {})
-        template = str(prompt.get("template") or "")
-        desc = await ctx.format_prompt_description(prompt)
-
-        is_admin = bool(user.get("is_admin"))
-        owner_tg_id = prompt.get("owner_tg_id")
-        is_owner = owner_tg_id == callback.from_user.id
-
-        raw_examples = prompt.get("example_file_ids") or []
-        if isinstance(raw_examples, str):
-            try:
-                raw_examples = json.loads(raw_examples) if raw_examples else []
-            except json.JSONDecodeError:
-                raw_examples = []
-        if not isinstance(raw_examples, list):
-            raw_examples = []
-        example_ids = [str(f) for f in raw_examples[:3] if f]
-        markup = ctx.build_prompt_card_markup(prompt, callback.from_user.id, back_callback="menu:community_tags:0")
-        if example_ids:
-            await callback.message.answer_photo(
-                photo=example_ids[0],
-                caption=desc,
-                reply_markup=markup,
-            )
-        else:
-            await callback.message.edit_text(desc, reply_markup=markup)
+        await ctx.present_prompt_card(
+            callback.message,
+            prompt,
+            callback.from_user.id,
+            back_callback="menu:community_tags:0",
+        )
         await callback.answer()
 
     @router.callback_query(F.data.startswith("menu:tags"))

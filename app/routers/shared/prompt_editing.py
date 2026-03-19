@@ -6,6 +6,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from app.keyboards.admin import build_prompt_edit_images_menu
 from app.states import AdminStates
 from app.utils import ensure_dict, extract_variables
 from app.routers.common import RouterCtx
@@ -44,6 +45,72 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         await ctx.show_prompt_edit_actions(callback.message, prompt, is_admin_view=is_admin_view)
         await callback.answer()
 
+    @router.callback_query(F.data.startswith("admin:editpart:images:"))
+    async def admin_edit_prompt_images_menu(callback: CallbackQuery) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+        ref_id = prompt.get("reference_photo_file_id")
+        example_ids = ctx.normalize_example_file_ids(prompt.get("example_file_ids"))
+        ref_line = "set" if ref_id else "not set"
+        ex_line = f"{len(example_ids)} photo(s)" if example_ids else "none"
+        await callback.message.answer(
+            "🖼 Images & examples\n"
+            f"Reference image: {ref_line}\n"
+            f"Example images: {ex_line}\n"
+            "Choose an action:",
+            reply_markup=build_prompt_edit_images_menu(prompt_id),
+        )
+        await callback.answer()
+
+    @router.callback_query(F.data.startswith("admin:editpart:import_json:"))
+    async def admin_edit_prompt_import_json_start(callback: CallbackQuery, state: FSMContext) -> None:
+        if not callback.message:
+            return
+        user = await ctx.repo.get_user(callback.from_user.id)
+        if not user:
+            await callback.answer("Access denied", show_alert=True)
+            return
+        try:
+            prompt_id = int((callback.data or "").split(":")[-1])
+        except ValueError:
+            await callback.answer("Invalid prompt id", show_alert=True)
+            return
+        prompt = await ctx.repo.get_prompt_by_id(prompt_id)
+        if not prompt:
+            await callback.answer("Prompt not found", show_alert=True)
+            return
+        is_admin = bool(user.get("is_admin"))
+        is_owner = prompt.get("owner_tg_id") == callback.from_user.id
+        if not (is_admin or is_owner):
+            await callback.answer("No permission", show_alert=True)
+            return
+        await state.set_state(AdminStates.waiting_import_json)
+        await state.update_data(import_target_prompt_id=prompt_id)
+        await callback.message.answer(
+            "Send a .json file (exported prompt). "
+            "This prompt will be updated from the file (title, template, features / variable_descriptions). "
+            "Reference photo and example images are kept as they are now."
+        )
+        await callback.answer()
+
     @router.callback_query(F.data.startswith("admin:editpart:description:"))
     async def admin_edit_prompt_description_start(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
@@ -69,9 +136,12 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         await state.clear()
         await state.update_data(editing_prompt_id=prompt_id)
         await state.set_state(AdminStates.waiting_prompt_edit_description)
-        current = (prompt.get("description") or prompt.get("title") or "").strip()
+        current = ctx.editable_prompt_description_preview(prompt)
+        preview = current.strip() or "(empty)"
+        if len(preview) > 3500:
+            preview = preview[:3500] + "…"
         await callback.message.answer(
-            f"📝 Current description: {current or '(empty)'}\nSend new description:"
+            f"📝 Current description:\n{preview}\n\nSend new description:"
         )
         await callback.answer()
 
