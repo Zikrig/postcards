@@ -821,23 +821,14 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         feach_data = ensure_dict(prompt.get("feach_data") or {})
         features = feach_data.get("features") or {}
         idea = feach_data.get("idea", "")
-        steps = build_final_setup_steps(features)
-        if not steps:
-            variables_spec = build_variables_spec_legacy_no_wizard(features)
-            await _run_final_deepseek_generate(
-                callback.message,
-                prompt_id,
-                idea,
-                variables_spec,
-                callback.from_user.id,
-            )
-            return
-        await state.set_state(FinalPromptSetupStates.choosing)
-        await state.update_data(
-            final_wizard_prompt_id=prompt_id,
-            final_wizard_keys=[s["feat_key"] for s in steps],
-            final_wizard_meta=[{"mode": s["mode"], "enabled_opts": list(s["enabled_opts"])} for s in steps],
-            final_wizard_idx=0,
-            final_wizard_choices={},
+        # UX: "Generate Prompt from Draft" should not ask variable-by-variable choices.
+        # We pass a fully specified variables_spec to DeepSeek (legacy behavior),
+        # so generation happens immediately.
+        variables_spec = build_variables_spec_legacy_no_wizard(features)
+        await _run_final_deepseek_generate(
+            callback.message,
+            prompt_id,
+            idea,
+            variables_spec,
+            callback.from_user.id,
         )
-        await _send_final_wizard_step(callback.message, state)
