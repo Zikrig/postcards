@@ -23,55 +23,6 @@ from app.utils import ensure_dict, get_feach_option_enabled, get_feach_option_te
 from app.routers.common import RouterCtx
 
 
-async def resolve_primary_onboard_feature_back_callback(
-    state: FSMContext,
-    prompt_id: int,
-    is_owner: bool,
-    feat_key: str,
-) -> str:
-    """During primary onboarding, Back goes to previous variable; otherwise default prompt card."""
-    cur = await state.get_state()
-    if cur != PrimaryPromptOnboardingStates.reviewing_variables:
-        return f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
-    data = await state.get_data()
-    try:
-        pid = int(data.get("ponboard_prompt_id"))
-    except (TypeError, ValueError):
-        return f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
-    keys = list(data.get("ponboard_keys") or [])
-    try:
-        idx = int(data.get("ponboard_idx", 0))
-    except (TypeError, ValueError):
-        idx = 0
-    if pid != prompt_id or idx < 0 or idx >= len(keys) or keys[idx] != feat_key:
-        return f"menu:my_prompt_item:{prompt_id}" if is_owner else f"admin:pw:item:{prompt_id}"
-    return f"user:ponboard_feat_back:{prompt_id}:{idx}"
-
-
-async def is_primary_onboard_feature_step(
-    state: FSMContext,
-    prompt_id: int,
-    feat_key: str,
-) -> bool:
-    """True if this variable is the current step in primary onboarding."""
-    cur = await state.get_state()
-    if cur != PrimaryPromptOnboardingStates.reviewing_variables:
-        return False
-    data = await state.get_data()
-    try:
-        pid = int(data.get("ponboard_prompt_id"))
-    except (TypeError, ValueError):
-        return False
-    keys = list(data.get("ponboard_keys") or [])
-    try:
-        idx = int(data.get("ponboard_idx", 0))
-    except (TypeError, ValueError):
-        idx = 0
-    if pid != prompt_id or idx < 0 or idx >= len(keys):
-        return False
-    return keys[idx] == feat_key
-
-
 def register_shared_features(router: Router, ctx: RouterCtx) -> None:
     async def _reopen_prompt_card_message(message: Message, prompt_id: int, viewer_tg_id: int) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
@@ -213,7 +164,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         feat = features[feat_key]
         varname = feat.get("varname", feat_key)
         about = feat.get("about", "")
-        back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
@@ -221,7 +171,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     prompt_id,
                     feat_key,
                     feat,
-                    back_callback=back_cb,
                 ),
             )
         except TelegramBadRequest:
@@ -231,7 +180,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                     prompt_id,
                     feat_key,
                     feat,
-                    back_callback=back_cb,
                 ),
             )
         await callback.answer()
@@ -299,14 +247,12 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
-            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
                         prompt_id,
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
-                        back_callback=back_cb,
                     )
                 )
             except TelegramBadRequest:
@@ -385,7 +331,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             nf = fe.get(k) if isinstance(fe.get(k), dict) else {}
             varname = nf.get("varname", k)
             about = nf.get("about", "")
-            back_cb = f"user:ponboard_feat_back:{prompt_id}:{new_idx}"
             try:
                 await callback.message.edit_text(
                     f"Variable: {varname}\nAbout: {about}",
@@ -393,7 +338,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         prompt_id,
                         k,
                         nf,
-                        back_callback=back_cb,
                     ),
                 )
             except TelegramBadRequest:
@@ -403,7 +347,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
                         prompt_id,
                         k,
                         nf,
-                        back_callback=back_cb,
                     ),
                 )
             await callback.answer("Variable removed")
@@ -506,14 +449,12 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
-            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, feat_key)
             try:
                 await callback.message.edit_reply_markup(
                     reply_markup=build_feature_config_menu(
                         prompt_id,
                         feat_key,
                         feach_data.get("features", {}).get(feat_key, {}),
-                        back_callback=back_cb,
                     )
                 )
             except TelegramBadRequest:
@@ -604,16 +545,12 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if prompt:
             feach_data = ensure_dict(prompt.get("feach_data") or {})
-            is_admin = bool((await ctx.repo.get_user(message.from_user.id) or {}).get("is_admin"))
-            is_owner = prompt.get("owner_tg_id") == message.from_user.id
-            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, str(feat_key))
             await message.answer(
                 "Option added.",
                 reply_markup=build_feature_config_menu(
                     prompt_id,
                     str(feat_key),
                     feach_data.get("features", {}).get(feat_key, {}),
-                    back_callback=back_cb,
                 ),
             )
 
@@ -630,7 +567,6 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
         except ValueError:
             await callback.answer("Invalid", show_alert=True)
             return
-        feat_key = parts[3]
         prompt = await ctx.repo.get_prompt_by_id(prompt_id)
         if not prompt:
             await callback.answer("Prompt not found", show_alert=True)
@@ -642,55 +578,9 @@ def register_shared_features(router: Router, ctx: RouterCtx) -> None:
             await callback.answer("Not allowed", show_alert=True)
             return
 
-        if await is_primary_onboard_feature_step(state, prompt_id, feat_key):
-            data = await state.get_data()
-            keys = list(data.get("ponboard_keys") or [])
-            idx = int(data.get("ponboard_idx", 0))
-            next_idx = idx + 1
-            if next_idx >= len(keys):
-                await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
-                await state.clear()
-                await callback.answer()
-                return
-            await state.update_data(ponboard_idx=next_idx)
-            prompt = await ctx.repo.get_prompt_by_id(prompt_id)
-            if not prompt:
-                await state.clear()
-                await callback.answer("Prompt not found", show_alert=True)
-                return
-            feach_data = ensure_dict(prompt.get("feach_data") or {})
-            feats = feach_data.get("features") or {}
-            if not isinstance(feats, dict):
-                feats = {}
-            next_key = keys[next_idx]
-            nf = feats.get(next_key) if isinstance(feats.get(next_key), dict) else {}
-            varname = nf.get("varname", next_key)
-            about = nf.get("about", "")
-            back_cb = await resolve_primary_onboard_feature_back_callback(state, prompt_id, is_owner, next_key)
-            try:
-                await callback.message.edit_text(
-                    f"Variable: {varname}\nAbout: {about}",
-                    reply_markup=build_feature_config_menu(
-                        prompt_id,
-                        next_key,
-                        nf,
-                        back_callback=back_cb,
-                    ),
-                )
-            except TelegramBadRequest:
-                await callback.message.answer(
-                    f"Variable: {varname}\nAbout: {about}",
-                    reply_markup=build_feature_config_menu(
-                        prompt_id,
-                        next_key,
-                        nf,
-                        back_callback=back_cb,
-                    ),
-                )
-            await callback.answer()
-            return
-
-        await ctx.present_prompt_card(callback.message, prompt, callback.from_user.id)
+        if await state.get_state() == PrimaryPromptOnboardingStates.reviewing_variables:
+            await state.clear()
+        await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:optview:"))

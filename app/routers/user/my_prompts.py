@@ -31,10 +31,9 @@ async def _send_primary_onboard_step(
     feat = feats.get(k) if isinstance(feats.get(k), dict) else {}
     varname = feat.get("varname", k)
     about = feat.get("about", "")
-    back_cb = f"user:ponboard_feat_back:{prompt_id}:{idx}"
     await message.answer(
         f"Variable: {varname}\nAbout: {about}",
-        reply_markup=build_feature_config_menu(prompt_id, k, feat, back_callback=back_cb),
+        reply_markup=build_feature_config_menu(prompt_id, k, feat),
     )
 
 
@@ -161,12 +160,11 @@ def register_user_my_prompts(router: Router, ctx: RouterCtx) -> None:
         feat = feats.get(k) if isinstance(feats.get(k), dict) else {}
         varname = feat.get("varname", k)
         about = feat.get("about", "")
-        back_cb = f"user:ponboard_feat_back:{prompt_id}:{prev_idx}"
         await callback.answer()
         try:
             await callback.message.edit_text(
                 f"Variable: {varname}\nAbout: {about}",
-                reply_markup=build_feature_config_menu(prompt_id, k, feat, back_callback=back_cb),
+                reply_markup=build_feature_config_menu(prompt_id, k, feat),
             )
         except TelegramBadRequest:
             await _send_primary_onboard_step(

@@ -1,5 +1,5 @@
 """Shared keyboard helpers and components used by both user and admin keyboards."""
-from typing import Any, Optional
+from typing import Any
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -26,7 +26,6 @@ def build_feature_config_menu(
     prompt_id: int,
     feat_key: str,
     feature: dict[str, Any],
-    back_callback: Optional[str] = None,
     show_dont_specify: bool = True,
 ) -> InlineKeyboardMarkup:
     opts = feature.get("options") or {}
@@ -71,8 +70,8 @@ def build_feature_config_menu(
             ]
         )
     rows.append([InlineKeyboardButton(text="Done", callback_data=f"admin:featdone:{prompt_id}:{feat_key}")])
-    back_cb = back_callback or f"menu:my_prompt_item:{prompt_id}"
-    rows.append([InlineKeyboardButton(text="Back", callback_data=back_cb)])
+    # Same destination as Done: Prompt Generation Menu (admin:genmenu handler).
+    rows.append([InlineKeyboardButton(text="Back", callback_data=f"admin:genmenu:{prompt_id}")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

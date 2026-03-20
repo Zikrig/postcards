@@ -7,7 +7,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from app.keyboards.admin import build_prompt_edit_images_menu
-from app.states import AdminStates
+from app.states import AdminStates, PrimaryPromptOnboardingStates
 from app.utils import ensure_dict, extract_variables
 from app.routers.common import RouterCtx
 
@@ -48,7 +48,7 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         await callback.answer()
 
     @router.callback_query(F.data.startswith("admin:genmenu:"))
-    async def admin_prompt_generation_menu(callback: CallbackQuery) -> None:
+    async def admin_prompt_generation_menu(callback: CallbackQuery, state: FSMContext) -> None:
         if not callback.message:
             return
 
@@ -72,6 +72,10 @@ def register_shared_editing(router: Router, ctx: RouterCtx) -> None:
         if not (is_admin or is_owner):
             await callback.answer("No permission", show_alert=True)
             return
+
+        if await state.get_state() == PrimaryPromptOnboardingStates.reviewing_variables:
+            await state.clear()
+            logger.info("admin_prompt_generation_menu: cleared primary onboarding FSM")
 
         logger.info("admin_prompt_generation_menu: prompt_id=%s viewer=%s", prompt_id, callback.from_user.id)
         await ctx.send_prompt_generation_menu(callback.message, prompt_id, callback.from_user.id)
