@@ -418,7 +418,14 @@ class RouterCtx:
         viewer_tg_id: int,
         back_callback: Optional[str] = None,
     ) -> InlineKeyboardMarkup:
-        """Pick the correct prompt-card keyboard based on viewer's role."""
+        """
+        Pick the correct prompt-card keyboard based on viewer's role.
+
+        Admins browsing user-owned prompts from admin UI (callbacks starting with ``admin:``,
+        or no back_callback e.g. after toggles) always get the admin community card — including
+        when the prompt belongs to the admin. If the admin opens their own prompt from the normal
+        user menu (``menu:...`` backs), keep the owner card so UX stays user-like.
+        """
         owner_tg_id = prompt.get("owner_tg_id")
         is_admin = viewer_tg_id in self.settings.admin_ids
         is_owner = owner_tg_id == viewer_tg_id
@@ -428,14 +435,19 @@ class RouterCtx:
         is_active = bool(prompt.get("is_active", True))
         template = str(prompt.get("template") or "")
 
-        if is_admin and not is_owner and owner_tg_id is not None:
-            return build_admin_community_card(
-                prompt_id,
-                feach_data,
-                template=template,
-                back_callback=back_callback or "admin:pw:users:0",
-            )
-        elif owner_tg_id is None:
+        bc = str(back_callback or "")
+        # User-owned prompt + admin: use admin community tools unless owner opened from user menu.
+        if is_admin and owner_tg_id is not None:
+            opened_from_user_menu = bool(is_owner and bc.startswith("menu:"))
+            if not opened_from_user_menu:
+                return build_admin_community_card(
+                    prompt_id,
+                    feach_data,
+                    template=template,
+                    back_callback=back_callback or "admin:pw:users:0",
+                )
+
+        if owner_tg_id is None:
             return build_admin_prompt_card(
                 prompt_id,
                 feach_data,
