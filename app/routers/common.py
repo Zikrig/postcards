@@ -570,23 +570,26 @@ class RouterCtx:
           - True  → админский флоу (Back to list → admin:pw:list)
           - False → юзерский флоу (Back to list → menu:my_prompts:0)
           - None  → autodetect по prompt.owner_tg_id и user.is_admin (вызывающий код может пробросить явно)
+
+        Пока финальный шаблон не сгенерирован (черновик), это меню не показываем — только Prompt Generation Menu.
         """
-        # Clone is shown only for admins and only when prompt is not in "draft" state.
+        if prompt_record_is_draft(prompt):
+            uid = message.from_user.id if message.from_user else None
+            if uid is not None:
+                logger.info(
+                    "show_prompt_edit_actions: draft prompt_id=%s → Prompt Generation Menu (not edit menu)",
+                    prompt.get("id"),
+                )
+                await self.send_prompt_generation_menu(message, int(prompt["id"]), uid)
+            return
+
+        # Clone is shown only for admins; draft branch above already exited.
         viewer_is_admin = bool(message.from_user and message.from_user.id in self.settings.admin_ids)
-        feach_data = ensure_dict(prompt.get("feach_data") or {})
-        draft_idea = feach_data.get("idea", "")
-        template = str(prompt.get("template") or "")
-        is_draft = (
-            (template == draft_idea)
-            or (not template)
-            or (template == "Your prompt template here")
-        )
 
         logger.info(
-            "show_prompt_edit_actions: prompt_id=%s title=%r is_draft=%r viewer_is_admin=%r is_admin_view=%r",
+            "show_prompt_edit_actions: prompt_id=%s title=%r viewer_is_admin=%r is_admin_view=%r",
             prompt.get("id"),
             prompt.get("title"),
-            is_draft,
             viewer_is_admin,
             is_admin_view,
         )
@@ -604,7 +607,7 @@ class RouterCtx:
                 int(prompt["id"]),
                 back_callback=back_cb,
                 show_clone=viewer_is_admin,
-                is_draft=is_draft,
+                is_draft=False,
             ),
         )
 

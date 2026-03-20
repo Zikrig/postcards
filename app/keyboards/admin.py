@@ -359,8 +359,9 @@ def build_admin_prompt_card(
             )]
         )
 
-    # Export/Delete/Clone moved into Prompt Edit menu
-    rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
+    # Export/Delete/Clone live under Prompt Edit menu — only after final template exists (not draft).
+    if not is_draft:
+        rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -387,6 +388,7 @@ def build_admin_community_card(
         )
 
     rows.append([InlineKeyboardButton(text="🧩 Prompt Generation Menu", callback_data=f"admin:genmenu:{prompt_id}")])
-    rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
+    if not is_draft:
+        rows.append([InlineKeyboardButton(text="Prompt Edit menu", callback_data=f"admin:edit:{prompt_id}")])
     rows.append([InlineKeyboardButton(text="◀ Back", callback_data=back_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows)
